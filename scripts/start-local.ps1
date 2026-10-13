@@ -1,6 +1,7 @@
 param(
     [switch]$PrepareModels,
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$RepairPostgresPassword
 )
 
 Set-StrictMode -Version Latest
@@ -48,9 +49,35 @@ if (-not (Test-Path $gmeeEnvFile)) {
 }
 
 $composeArgs = @('compose', '--env-file', '.env', '-f', 'infra/docker-compose.yml', '-f', 'infra/docker-compose.local.yml')
+if ($RepairPostgresPassword) {
+    Write-Host 'Starting PostgreSQL to repair the local login while preserving database contents.'
+    & docker @composeArgs up -d --wait --wait-timeout 120 postgres
+    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL could not start. Password repair was not attempted.' }
+    # The official PostgreSQL image permits its container-local Unix socket.
+    # Read credentials inside that container; never place passwords in command
+    # arguments, host output, or a generated SQL file.
+    $repairSql = @'
+\getenv gmee_role POSTGRES_USER
+\getenv gmee_password POSTGRES_PASSWORD
+ALTER ROLE :"gmee_role" WITH PASSWORD :'gmee_password';
+'@
+    $repairSql | & docker @composeArgs exec -T postgres sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL password repair failed. Database contents were retained.' }
+    Write-Host 'PostgreSQL login now matches the current local configuration.'
+    # Clear the failed container's restart backoff and old unhealthy status
+    # before Compose waits for readiness again. Datastores stay running.
+    & docker @composeArgs stop frontend backend
+    if ($LASTEXITCODE -ne 0) { throw 'Password repaired, but the app containers could not be stopped. Restart Docker Desktop and rerun this launcher.' }
+}
 Write-Host 'Building and starting GMEE. The first run downloads dependencies and may take several minutes.'
 & docker @composeArgs up -d --build --wait --wait-timeout 300
-if ($LASTEXITCODE -ne 0) { throw 'Startup failed. Run docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.local.yml logs --tail 80 to inspect it. Existing volumes were retained.' }
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'Startup failed. Recent backend output follows:' -ForegroundColor Yellow
+    & docker @composeArgs logs --no-color --tail 80 backend
+    Write-Host 'If it says password authentication failed, run:' -ForegroundColor Yellow
+    Write-Host 'powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1 -RepairPostgresPassword'
+    throw 'GMEE could not start. Review the backend error above. Existing configuration and database contents were retained.'
+}
 if ($PrepareModels) {
     Write-Host 'Preparing the local NLP models. This downloads model weights once.'
     & docker @composeArgs exec -T backend python scripts/prepare_models.py

@@ -56,6 +56,27 @@ If startup fails, inspect the bounded logs:
 docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.local.yml logs --tail 80
 ```
 
+### PostgreSQL reports `password authentication failed for user "gmee"`
+
+Docker keeps database volumes when you replace or re-extract the project. If
+the new copy generates another `.env`, its new password can differ from the
+password already stored in PostgreSQL. Keep the original `.env` when updating
+the project. A healthy PostgreSQL container alone does not verify that the app
+can authenticate.
+
+To synchronize this project's local PostgreSQL login with the current `.env`
+and start GMEE again, run this in the extracted project folder:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1 -RepairPostgresPassword
+```
+
+This explicitly changes the configured PostgreSQL role's password using the
+container's local socket. It preserves database contents and uses the current
+configuration. Do not delete the database volume to fix a password mismatch.
+If another service reports an authentication error afterward, restore its
+original credentials from your earlier `.env` and rerun the launcher.
+
 For native hot reload, install the dependencies as described in [README](README.md),
 start the backend on 8000, then run `npm run dev` from `frontend`. Its default
 port is 3000; `/api` proxies to that backend. Binding to `0.0.0.0` enables a

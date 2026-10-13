@@ -85,6 +85,29 @@ The pretrained snapshots used here resolve to:
 model revisions/local snapshot paths for frozen research runs. Run real model
 checks with `pytest -m model -o addopts=''`; unit tests exclude model downloads.
 
+## Local PostgreSQL password recovery
+
+The Windows launcher now accepts `-RepairPostgresPassword` for a retained
+PostgreSQL volume whose stored role password differs from the current local
+configuration. Ordinary startup never rotates credentials. Explicit recovery
+uses the container-local socket, preserves the existing `.env` and database
+contents, and resets the backend/frontend restart state before checking readiness.
+Startup failures now display the backend's recent logs directly.
+
+The reported authentication failure was reproduced against a disposable
+PostgreSQL 16 container with SCRAM host authentication. The repair ran through
+the PowerShell launcher and real `psql`: the current password then authenticated,
+the old password was rejected, and an existing sentinel row was unchanged.
+Five controlled launcher scenarios pass: normal startup, explicit recovery,
+backend failure, unavailable PostgreSQL, and unsuccessful repair. PowerShell
+syntax, the 20 infrastructure tests, and static deployment checks also pass.
+The launcher scenarios are required in the Windows CI job.
+
+This validates the credential repair and launcher control flow. The user's
+Windows Docker instance is not remotely accessible from this workspace. A full
+container rebuild here remains blocked by build-container resolution of the
+cloud proxy; it is not claimed as a successful Windows startup test.
+
 ## External and scientific requirements
 
 Live Wikipedia and the default BBC RSS HTTPS destinations were denied by the

@@ -65,6 +65,9 @@ jobs:
       - name: Parse read-only verification scripts (no API requests)
         shell: powershell
         run: powershell.exe -NoProfile -File infra/scripts/validate_powershell.ps1
+      - name: Verify local launcher recovery and failure handling
+        shell: powershell
+        run: powershell.exe -NoProfile -File infra/tests/test_local_launcher.ps1
 
   http-smoke:
     runs-on: ubuntu-latest
