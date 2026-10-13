@@ -22,6 +22,7 @@ import sys
 from collections import defaultdict
 from itertools import combinations
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -76,7 +77,7 @@ async def load_all_data() -> tuple[list[dict], dict]:
             ORDER BY origin, annotator, label
         """))).all()
 
-    stats = {
+    stats: dict[str, Any] = {
         "total_pairs": total_pairs,
         "total_labels": total_labels,
         "buckets": {r[0]: r[1] for r in bucket_counts},

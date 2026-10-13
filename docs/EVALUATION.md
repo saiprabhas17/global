@@ -1,186 +1,76 @@
-# GMEE Evaluation Methodology
+# GMEE evaluation and human review
 
-This document describes the gold-standard evaluation procedure for the GMEE
-claim-similarity and verdict engine, designed for reproducibility and
-publication-grade rigor.
+Engineering smoke tests and research experiments answer different questions.
+Current implementation/validation is recorded in [Verification](VERIFICATION.md).
+The research task, splits, ablations and uncertainty protocol are in
+[Research](RESEARCH.md). No human-held-out accuracy result is claimed here.
 
----
+## Task definitions
 
-## 1. Overview
+- Claim detection: distinguish check-worthy factual statements from opinions or questions. False factual statements remain claims. LIAR veracity labels cannot supervise claim extraction.
+- Relatedness: SAME_STORY, EVOLVED, DISTINCT for a pair of claims about an event. A positive relatedness label does not establish mutation, copying or truth.
+- Typed/contextual change: independent type and source-span annotations, plus PARAPHRASE, UPDATE_OR_CORRECTION, INCOMPATIBLE_ASSERTION, INSUFFICIENT_CONTEXT or UNRELATED.
+- Evidence stance: evaluate the actual cited passage against the claim. Cosine similarity retrieves candidates; it never assigns entailment or contradiction.
+- Lineage: evaluate links against independent attribution/event evidence. Publication order alone does not establish propagation.
 
-GMEE's evaluation answers the question: **"When the engine says two claims are
-similar, do independent annotation signals agree?"**
+## Authenticated annotation
 
-The evaluation uses a **stratified, multi-annotator consensus** protocol:
-1. Claim pairs are sampled across 6 cosine-similarity buckets
-2. Three independent NLP annotation signals label each pair
-3. Majority consensus produces the gold label
-4. Standard retrieval metrics (AUROC, F1, Brier, ECE) are computed against the
-   engine's stored similarity scores
+Eval Lab requires an account. The server assigns the annotator identity from the
+current authenticated user; clients cannot impersonate another reviewer or
+upgrade an automatic vote to human. GET `/eval/rubric` supplies the versioned
+instructions. GET `/eval/next` returns a blinded pair, without model scores or
+other reviewers' decisions. POST `/eval/label` records the label, optional typed
+changes, exact Unicode spans, contextual relation and notes. Revisions retain
+history. An empty span list means explicitly reviewed with no changed spans;
+omitting the field means that target was not reviewed.
 
----
+Consensus requires at least two distinct authenticated humans and unanimous
+current labels. Type, span and context consensus are reported separately;
+incomplete annotations or dissent remain unresolved. The administrator's
+independent review queue (`/eval/review/next`) presents disagreements without
+exposing other votes; it never erases dissent or invents adjudicated gold.
+A supervisor-led adjudication protocol remains a human research activity.
 
-## 2. Pair Sampling (`scripts/sample_eval_pairs.py`)
+Automatic, legacy and test origins are separated from human gold. Weak labels
+are diagnostics/training aids and cannot be promoted by majority vote into an
+independent benchmark. Coverage sampling is appropriate for held-out work;
+train-only uncertainty ordering must not adapt validation/test sampling.
 
-Pairs are drawn from the embedded claim corpus, stratified by cosine similarity:
+## Frozen experiments
 
-| Bucket | Cosine Range | Purpose |
-|--------|-------------|---------|
-| `b95`  | 0.95–1.00   | Near-identical / duplicates |
-| `b85`  | 0.85–0.95   | High similarity — likely same story |
-| `b75`  | 0.75–0.85   | Moderate — mixed same/evolved/distinct |
-| `b60`  | 0.60–0.75   | Low — mostly distinct |
-| `b40`  | 0.40–0.60   | Very low — almost certainly distinct |
-| `b00`  | 0.00–0.40   | Baseline negatives |
+Use the admin split/export APIs and `backend/scripts/export_research_dataset.py`
+to freeze records with event identity, human provenance, original claim/source
+metadata, exact annotations and hashes. Shared events, claims, articles and
+canonical text components stay in one split. Fit on train, select thresholds on
+dev, and report untouched test comparisons with grouped uncertainty.
 
-Cross-outlet pairs are preferred (a same-outlet pair cannot corroborate).
-Each claim participates in at most 2 pairs to maintain diversity.
+`backend/scripts/run_research_experiment.py` provides matched baselines and
+ablations. Binary relatedness metrics cannot substitute for typed-change,
+span, evidence or lineage evaluation. Review rare-class and event support;
+passing the export's computational minimum is not a statistical guarantee.
+Publish dataset/model/code revisions, raw predictions and negative findings.
 
----
+## Legacy artifacts
 
-## 3. Annotation Protocol
+Historical JSON/Markdown results are retained for traceability. The stored LIAR
+claim-extraction score used the wrong target; the stored FEVER score compared
+claims with other evaluation claims instead of Wikipedia evidence. Neither
+validates the current task. `mutation_detection.json` contains zero pairs and
+is unperformed. Perfect graph consistency from a three-claim SQLite fixture
+is an engineering check. `backend/eval_publication_report.md` contains historical
+weak-label diagnostics, not publication-grade human results.
 
-### 3.1 Label Taxonomy
+The corrected runners in [evaluation](../evaluation/README.md) refuse LIAR as
+an extraction target and require explicit frozen FEVER evidence passages. They
+preserve earlier outputs by requiring a new result path. The current local
+extraction model is FLAN-T5-base, retrieval is all-mpnet-base-v2 (768 dimensions),
+and local stance is three-class DeBERTa. Record exact resolved revisions;
+changing embedding models requires complete versioned re-embedding.
 
-Each pair receives one of three labels:
+## Remaining scientific work
 
-- **SAME_STORY** — Both claims assert the same factual proposition.
-  They may use different words but describe the same event with the same
-  conclusion.
-
-- **EVOLVED** — One claim appears to be a mutation or development of the
-  other. They share a core event but differ in detail, scope, or framing.
-
-- **DISTINCT** — The claims describe different events or make unrelated
-  assertions.
-
-For evaluation metrics, **SAME_STORY** and **EVOLVED** are the positive class
-(the engine should assign them high similarity).
-
-### 3.2 Multi-Signal Automatic Annotation
-
-Three independent NLP annotators label each pair. These signals are
-deliberately **different from the engine's primary signal** (all-mpnet-base-v2
-cosine similarity) to avoid circular evaluation:
-
-#### Signal 1: NLI Entailment (`nli-annotator`)
-- **Model:** FLAN-T5-base (sequence-to-sequence NLI)
-- **Method:** Bidirectional entailment check:
-  - A entails B **AND** B entails A → SAME_STORY (mutual entailment)
-  - A entails B **OR** B entails A → EVOLVED (asymmetric)
-  - Neither entails → DISTINCT
-  - Any contradiction → DISTINCT
-- **Independence:** NLI operates on text semantics, not embedding similarity.
-
-#### Signal 2: Named-Entity Overlap (`entity-annotator`)
-- **Model:** spaCy `en_core_web_sm` NER
-- **Method:** Jaccard overlap of extracted named entities (PERSON, ORG, GPE,
-  DATE, etc.) combined with the pair's similarity bucket for calibration.
-  High entity overlap + high similarity → SAME_STORY.
-- **Independence:** Entity extraction is a surface-level signal orthogonal
-  to dense embeddings.
-
-#### Signal 3: Lexical Overlap (`lexical-annotator`)
-- **Method:** Weighted combination of word-level Jaccard and character
-  trigram TF-IDF cosine similarity.
-- **Decision boundaries:** Calibrated against expected bucket distributions.
-- **Independence:** Sparse lexical features are mathematically orthogonal
-  to dense transformer embeddings.
-
-### 3.3 Consensus
-
-Majority vote (≥2 of 3 annotators agree). Ties that include DISTINCT resolve
-to DISTINCT (conservative: the negative class wins), matching established
-annotation protocols (Artstein & Poesio, 2008).
-
-### 3.4 Methodological Validity
-
-This multi-signal approach mirrors standard practice in NLP evaluation:
-
-1. **Non-circularity:** The three annotation signals (NLI, entity overlap,
-   lexical overlap) are independent of the engine's primary embedding
-   similarity, avoiding the pitfall of evaluating a system against its own
-   output.
-
-2. **Multi-annotator consensus:** Three voters with majority vote matches
-   the typical crowdsourcing protocol (3 annotators per item).
-
-3. **Inter-annotator agreement:** Cohen's kappa is computed for every
-   annotator pair and reported alongside metrics.
-
----
-
-## 4. Metrics (`app/services/eval/metrics.py`)
-
-All metrics are pure functions, unit-tested, and reproducible:
-
-| Metric | What It Measures |
-|--------|-----------------|
-| **AUROC** | Rank discrimination: can the engine distinguish positive from negative pairs? |
-| **Bootstrap 95% CI** | Confidence interval around AUROC (percentile method, n=1000 resamples) |
-| **Best F1** | Optimal F1 across all threshold values |
-| **F1@0.60** | F1 at the engine's operating threshold (the VERDICT_NEAR_MIN window) |
-| **Brier Score** | Mean squared error of probabilistic predictions (0 = perfect) |
-| **ECE** | Expected calibration error across 10 bins (lower = better calibrated) |
-| **McNemar Test** | Paired significance between two scorers at the operating point |
-| **Cohen's κ** | Inter-annotator agreement (per annotator pair) |
-| **Threshold Sweep** | P/R/F1 at 11 candidate operating points (0.40–0.90) |
-| **Reliability Bins** | Calibration diagram data: predicted vs. empirical positive rate per bin |
-
----
-
-## 5. Running the Evaluation
-
-```bash
-# 1. Sample stratified pairs (100 per bucket from a pool of 3000)
-python scripts/sample_eval_pairs.py 100 3000
-
-# 2. Auto-label all pairs with 3 independent annotators
-python scripts/auto_label_eval_pairs.py
-
-# 3. Generate publication-grade report (JSON + Markdown)
-python scripts/generate_pub_report.py
-
-# Output:
-#   eval_report.json               — machine-readable metrics
-#   eval_publication_report.md     — human-readable paper-ready report
-```
-
----
-
-## 6. Reproducing Results
-
-The evaluation is fully deterministic:
-- Pair sampling uses a fixed RNG seed (`20260916`)
-- Bootstrap CIs use seed `1729`
-- All three annotation signals are deterministic given the same model weights
-
-To reproduce from scratch:
-```bash
-cd backend
-pip install -e ".[dev]"
-python scripts/sample_eval_pairs.py 100 3000
-python scripts/auto_label_eval_pairs.py
-python scripts/generate_pub_report.py
-```
-
----
-
-## 7. Limitations & Transparency
-
-1. **Automated annotators are imperfect:** NLI models miss irony, hedging, and
-   temporal conditionality. Entity extraction misses implicit references.
-   Lexical overlap fails on paraphrases with no shared vocabulary.
-
-2. **FLAN-T5-base (~250M params)** is undersized for production NLI. A
-   purpose-built model (`cross-encoder/nli-deberta-v3-base`) would improve
-   annotation quality. The current choice trades accuracy for self-contained
-   reproducibility (no external API dependency).
-
-3. **Human validation recommended:** The automated labels should be validated
-   by labeling a random 50–100 pair subset in the Eval Lab tab
-   (`#/dashboard/eval`) and computing agreement with the automated labels.
-
-4. **Class imbalance:** Low-similarity buckets (b00, b40) dominate the pair
-   count. The positive class (SAME_STORY + EVOLVED) is naturally rarer,
-   which is expected — most random claim pairs are unrelated.
+Recruit independent annotators, pilot the rubric, curate licensed event groups,
+freeze held-out data, run matched baselines and ablations, measure type/span
+and correction false-alarm errors, and report grouped uncertainty. A working
+system or a successful synthetic smoke test does not establish paper novelty
+or real-world factual accuracy.

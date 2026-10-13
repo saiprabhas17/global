@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, TypedDict
 
-ALGORITHM_VERSION = "gmee-typed-text-v1"
+from app.services.evolution.quantities import Quantity, extract_quantities, quantity_key
+
+ALGORITHM_VERSION = "gmee-typed-text-v2"
 
 _NUMBER_PATTERN = r"[+−-]?(?:[$€£]\s*)?\d+(?:[.,]\d+)*(?:\s?%|[kmbKMB]\b)?"
 _NUMBER_RE = re.compile(rf"^{_NUMBER_PATTERN}$")
@@ -196,11 +198,12 @@ _STOPWORDS = (
 LIMITATIONS = (
     "English lexical heuristics only; no semantic entailment, fact checking, or model inference.",
     "Capitalized words are entity proxies, not named-entity recognition; sentence starts, aliases and uncased names can be misclassified.",
-    "Numbers are surface forms, not unit-aware quantities; equivalent formats or units may be flagged.",
+    "Quantity normalization covers explicit common English units and decimal formats only; ambiguous locales, inferred units, dates, number words and currency exchange are not resolved.",
     "Polarity, hedge, attribution and scope lexicons do not resolve negation scope, quotation, sarcasm or coreference.",
     "Case, whitespace and standalone punctuation are ignored for meaningful-change classification; this can miss punctuation-only meaning changes.",
     "Lexical differences and timestamps do not prove copying, causal lineage or observed propagation.",
     "Naive timestamps are interpreted as UTC; missing or equal timestamps cannot establish temporal precedence.",
+    "Correction and update cues report wording in supplied text or user context; they do not independently verify a correction, citation, claim accuracy or event identity.",
 )
 
 ChangeKind = Literal[
@@ -230,9 +233,12 @@ class TextToken:
     text: str
     start: int
     end: int
+    canonical: str | None = None
 
     @property
     def normalized(self) -> str:
+        if self.canonical is not None:
+            return self.canonical
         return re.sub(
             r"\s+", "", self.text.casefold().replace("’", "'").replace("−", "-")
         )
@@ -263,6 +269,19 @@ class ChangeDetail(ChangedSpan):
     direction: str
 
 
+class ContextSignal(TypedDict):
+    kind: str
+    text: str
+    start: int
+    end: int
+    basis: str
+
+
+class QuantitiesByVersion(TypedDict):
+    older: list[Quantity]
+    newer: list[Quantity]
+
+
 class MutationAnalysis(TypedDict):
     algorithm_version: str
     mutation_types: list[str]
@@ -279,6 +298,14 @@ class MutationAnalysis(TypedDict):
     temporal_order: str
     lag_seconds: float | None
     limitations: list[str]
+    relation_category: str
+    relation_explanation: str
+    context_signals: list[ContextSignal]
+    quantities: QuantitiesByVersion
+    quantity_equivalent: bool
+    context_note: str | None
+    provenance_url: str | None
+    provenance_basis: str
 
 
 def tokens_with_spans(text: str) -> list[TextToken]:
@@ -287,6 +314,53 @@ def tokens_with_spans(text: str) -> list[TextToken]:
 
 def tokenize(text: str) -> list[str]:
     return [t.text for t in tokens_with_spans(text or "")]
+
+
+def _comparison_tokens(text: str, quantities: list[Quantity]) -> list[TextToken]:
+    """Collapse supported quantities while retaining original character spans."""
+    tokens: list[TextToken] = []
+    cursor = 0
+    for quantity in quantities:
+        tokens.extend(
+            TextToken(t.text, t.start + cursor, t.end + cursor)
+            for t in tokens_with_spans(text[cursor : quantity["start"]])
+            if t.lexical
+        )
+        tokens.append(
+            TextToken(
+                quantity["text"], quantity["start"], quantity["end"],
+                quantity_key(quantity),
+            )
+        )
+        cursor = quantity["end"]
+    tokens.extend(
+        TextToken(t.text, t.start + cursor, t.end + cursor)
+        for t in tokens_with_spans(text[cursor:])
+        if t.lexical
+    )
+    return tokens
+
+
+_CONTEXT_CUES = {
+    "correction": re.compile(r"\b(?:correction|corrected|retracted|retraction|erratum)\b", re.IGNORECASE),
+    "update": re.compile(r"\b(?:updated|revised|revision|latest (?:figures|estimate|count)|new estimate)\b", re.IGNORECASE),
+}
+
+
+def _context_signals(newer_text: str, context_note: str | None) -> list[ContextSignal]:
+    signals: list[ContextSignal] = []
+    for basis, text in (("newer_text", newer_text), ("user_context", context_note or "")):
+        for kind, pattern in _CONTEXT_CUES.items():
+            for match in pattern.finditer(text):
+                prefix = text[max(0, match.start() - 40) : match.start()]
+                # Do not promote a negated correction/update to a positive cue.
+                if re.search(r"\b(?:not|never|no|without)\b[^.!?;]{0,24}$", prefix, re.IGNORECASE):
+                    continue
+                signals.append({
+                    "kind": kind, "text": match.group(), "start": match.start(),
+                    "end": match.end(), "basis": basis,
+                })
+    return sorted(signals, key=lambda item: (item["basis"], item["start"], item["kind"]))
 
 
 def utc_timestamp(value: datetime | None) -> datetime | None:
@@ -314,7 +388,11 @@ def _entity(token: TextToken) -> bool:
 
 def _features(tokens: list[TextToken], kind: ChangeKind) -> list[str]:
     if kind == "numeric":
-        return [t.normalized for t in tokens if _NUMBER_RE.fullmatch(t.text)]
+        return [
+            re.sub(r"\s+", "", t.text.casefold().replace("−", "-"))
+            for t in tokens
+            if t.canonical is not None or _NUMBER_RE.fullmatch(t.text)
+        ]
     if kind == "entity":
         return [t.text for t in tokens if _entity(t)]
     lexicons = {
@@ -349,9 +427,12 @@ def analyze_text_change(
     *,
     older_timestamp: datetime | None = None,
     newer_timestamp: datetime | None = None,
+    context_note: str | None = None,
+    provenance_url: str | None = None,
 ) -> MutationAnalysis:
-    old = [t for t in tokens_with_spans(older_text) if t.lexical]
-    new = [t for t in tokens_with_spans(newer_text) if t.lexical]
+    older_quantities, newer_quantities = extract_quantities(older_text), extract_quantities(newer_text)
+    old = _comparison_tokens(older_text, older_quantities)
+    new = _comparison_tokens(newer_text, newer_quantities)
     matcher = difflib.SequenceMatcher(
         a=[t.normalized for t in old],
         b=[t.normalized for t in new],
@@ -463,6 +544,33 @@ def analyze_text_change(
         if lag == 0
         else "reversed"
     )
+    quantity_equivalent = bool(
+        older_quantities and not meaningful
+        and [q["text"].strip().casefold() for q in older_quantities]
+        != [q["text"].strip().casefold() for q in newer_quantities]
+    )
+    signals = _context_signals(newer_text, context_note)
+    if not meaningful:
+        relation_category = "EQUIVALENT_QUANTITY" if quantity_equivalent else "NO_LEXICAL_CHANGE"
+        relation_explanation = (
+            "The ordered quantities and remaining wording match after explicit unit conversion."
+            if quantity_equivalent else "No meaningful lexical change was found."
+        )
+    elif temporal_order in {"equal", "reversed"}:
+        relation_category = "CONTEXT_REQUIRED"
+        relation_explanation = "The timestamps do not establish the supplied older-to-newer order."
+    elif any(s["kind"] == "correction" for s in signals):
+        relation_category = "REPORTED_CORRECTION"
+        relation_explanation = "A correction cue appears in the supplied text or context; the correction and claim accuracy remain unverified."
+    elif any(s["kind"] == "update" for s in signals):
+        relation_category = "REPORTED_UPDATE"
+        relation_explanation = "An update cue appears in the supplied text or context; a changed figure may be a reporting update and is not evidence of misinformation."
+    elif any(k in found_kinds for k in ("numeric", "entity", "polarity", "attribution")):
+        relation_category = "CONTEXT_REQUIRED"
+        relation_explanation = "A substantive textual difference needs event context and independent evidence before it can be judged a correction, contradiction or distortion."
+    else:
+        relation_category = "TEXTUAL_CHANGE"
+        relation_explanation = "The wording changed; lexical comparison alone does not establish changed meaning, accuracy or copying."
     return {
         "algorithm_version": ALGORITHM_VERSION,
         "mutation_types": types,
@@ -479,4 +587,12 @@ def analyze_text_change(
         "temporal_order": temporal_order,
         "lag_seconds": lag,
         "limitations": list(LIMITATIONS),
+        "relation_category": relation_category,
+        "relation_explanation": relation_explanation,
+        "context_signals": signals,
+        "quantities": {"older": older_quantities, "newer": newer_quantities},
+        "quantity_equivalent": quantity_equivalent,
+        "context_note": context_note,
+        "provenance_url": provenance_url,
+        "provenance_basis": "user_supplied_reference_unverified" if provenance_url else "text_comparison_only",
     }

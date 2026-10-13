@@ -1,75 +1,55 @@
-# GMEE Evaluation Harness
+# GMEE research runners
 
-This directory contains the benchmarking, dataset download, and evaluation infrastructure for GMEE (Global Misinformation Evolution Engine).
+These tools support defined experimental tasks; stored historical metrics are
+not fresh validation. Use the backend virtual environment and record model,
+code and data revisions. Human benchmark work remains unperformed; see
+[Evaluation](../docs/EVALUATION.md) and [Research](../docs/RESEARCH.md).
 
-## Directory Structure
+## Claim detection
 
-```text
-evaluation/
-  README.md
-  data/
-    baselines/       # Downloaded benchmark datasets (LIAR, ClaimBuster, MultiFC, FEVER)
-    claim_pairs/     # Annotation schema, templates, and annotated claim pairs
-    verdicts/        # Verification datasets and intermediate outputs
-  scripts/           # Evaluation and baseline benchmark runners
-  results/           # Output metrics in JSON and Markdown formats
-```
-
----
-
-## Evaluation Scripts & CLI Instructions
-
-### 1. Download Benchmark Datasets (`download_datasets.py`)
-Downloads publicly available datasets (LIAR, ClaimBuster, MultiFC, FEVER dev) and writes a download manifest.
+LIAR veracity labels are rejected because false factual claims remain claims.
+Use independently annotated sentence-level binary labels, or ClaimBuster's
+check-worthiness target (a separate task). Nonempty extraction is a proxy
+classifier, not a measure of atomic decomposition or span fidelity.
 
 ```bash
-python evaluation/scripts/download_datasets.py --output evaluation/data/baselines/
+backend/.venv/bin/python evaluation/scripts/eval_claim_extraction.py \
+  --dataset claimbuster --data-path evaluation/data/baselines/claimbuster_test.csv \
+  --output evaluation/results/claimbuster-new-run.json --sample-size 500
 ```
 
-### 2. Claim Extraction Evaluator (`eval_claim_extraction.py`)
-Evaluates claim extraction precision, recall, and F1 on LIAR or ClaimBuster test sets.
+The result path must be new. Confirm source licensing, label provenance and
+frozen sampling before interpreting any result scientifically.
+
+## FEVER supplied-evidence evaluation
+
+Prepare separate frozen JSONL records `{id, passages:[{page,line,text}]}` for
+every evaluated claim. An explicit empty passage list means missing evidence.
+The evaluator never retrieves other evaluation claims as evidence.
 
 ```bash
-# Evaluate on LIAR test set:
-python evaluation/scripts/eval_claim_extraction.py \
-  --dataset liar \
-  --data-path evaluation/data/baselines/liar_test.csv \
-  --output evaluation/results/claim_extraction_liar.json \
-  --sample-size 500
-
-# Evaluate on ClaimBuster test set:
-python evaluation/scripts/eval_claim_extraction.py \
-  --dataset claimbuster \
-  --data-path evaluation/data/baselines/claimbuster_test.csv \
-  --output evaluation/results/claim_extraction_claimbuster.json \
-  --sample-size 500
-```
-
-### 3. Mutation Detection Evaluator (`eval_mutation_detection.py`)
-Evaluates embedding-based mutation detection against human-annotated claim pairs.
-
-```bash
-python evaluation/scripts/eval_mutation_detection.py \
-  --pairs evaluation/data/claim_pairs/pairs_annotated.csv \
-  --output evaluation/results/mutation_detection.json \
-  --threshold 0.85
-```
-
-### 4. Verdict Engine Evaluator & Ablation (`eval_verdict_engine.py`)
-Evaluates Verdict Engine probabilistic verification and performs a signal ablation sweep.
-
-```bash
-python evaluation/scripts/eval_verdict_engine.py \
+backend/.venv/bin/python evaluation/scripts/eval_verdict_engine.py \
   --data evaluation/data/baselines/fever_dev.jsonl \
-  --output evaluation/results/verdict_engine.json \
-  --sample-size 300
+  --evidence /path/to/frozen-wikipedia-passages.jsonl --evidence-mode retrieved \
+  --output evaluation/results/fever-new-run.json
 ```
 
-### 5. Graph Quality Evaluator (`eval_graph_quality.py`)
-Directly inspects the PostgreSQL store to compute temporal validity rate, semantic consistency, and graph connectivity metrics.
+`oracle` mode is an upper-bound supplied-evidence diagnostic; `retrieved` mode
+requires retrieval independent of held-out labels. This runner measures passage
+NLI aggregation, not the weighted corpus score or the official FEVER score.
+Use the official evidence-set scorer before claiming the latter.
 
-```bash
-python evaluation/scripts/eval_graph_quality.py \
-  --db-url "postgresql+asyncpg://postgres:postgres@localhost:55432/gmee" \
-  --output evaluation/results/graph_quality.json
-```
+## Mutation and graph tools
+
+The compatibility-named `eval_mutation_detection.py` is only a cosine-threshold
+baseline on pair labels. It cannot validate typed changes, parent selection,
+causal propagation or factual accuracy. Use the deployed 768-dimensional model
+and independent data. The versioned backend research harness supports proper
+frozen splits, fair baseline comparisons and separate typed-target evaluation.
+
+`eval_graph_quality.py` checks structural consistency; its stored three-claim
+fixture result is not measured real-world lineage precision. Empty-pair results
+are UNPERFORMED. Preserve historical results and generate new named artifacts.
+
+Dataset acquisition is implemented in `scripts/download_datasets.py` with an
+acquisition manifest; redistribution rights must be checked separately.

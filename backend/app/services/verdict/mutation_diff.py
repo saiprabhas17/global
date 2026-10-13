@@ -69,12 +69,16 @@ def diff_versions(
     *,
     older_timestamp: datetime | None = None,
     newer_timestamp: datetime | None = None,
+    context_note: str | None = None,
+    provenance_url: str | None = None,
 ) -> MutationDiffResult:
     analysis = analyze_text_change(
         old_text,
         new_text,
         older_timestamp=older_timestamp,
         newer_timestamp=newer_timestamp,
+        context_note=context_note,
+        provenance_url=provenance_url,
     )
     old, new = tokens_with_spans(old_text or ""), tokens_with_spans(new_text or "")
     matcher = difflib.SequenceMatcher(

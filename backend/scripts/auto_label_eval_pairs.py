@@ -24,6 +24,9 @@ import sys
 import uuid
 from collections import Counter
 from pathlib import Path
+from typing import Any
+
+from spacy.language import Language
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -49,11 +52,11 @@ ALL_ANNOTATORS = {ANNOTATOR_NLI, ANNOTATOR_ENTITY, ANNOTATOR_LEXICAL}
 # Signal 1: NLI stance (FLAN-T5-base)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_nli_tok = None
-_nli_mdl = None
+_nli_tok: Any = None
+_nli_mdl: Any = None
 
 
-def _load_nli():
+def _load_nli() -> tuple[Any, Any]:
     global _nli_tok, _nli_mdl
     if _nli_mdl is None:
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -106,10 +109,10 @@ def nli_label(text_a: str, text_b: str) -> str:
 # Signal 2: Named-entity overlap (spaCy)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_spacy_nlp = None
+_spacy_nlp: Language | None = None
 
 
-def _load_spacy():
+def _load_spacy() -> Language:
     global _spacy_nlp
     if _spacy_nlp is None:
         import spacy
@@ -353,7 +356,7 @@ async def main() -> None:
     pair_labels: dict[str, list[str]] = {}
     for lab in all_labels:
         pair_labels.setdefault(lab["pair_id"], []).append(lab["label"])
-    consensus_dist = Counter()
+    consensus_dist: Counter[str] = Counter()
     for labs in pair_labels.values():
         counts = Counter(labs)
         top_count = max(counts.values())

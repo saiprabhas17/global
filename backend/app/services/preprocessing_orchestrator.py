@@ -100,6 +100,8 @@ class PreprocessingOrchestrator:
                 try:
                     values = self._process(article, dup_detector)
                     status = values.pop("processing_status")
+                    if not isinstance(status, ProcessingStatusEnum):
+                        raise TypeError("Preprocessing returned an invalid status")
                     won = await finish_article(
                         db, Stage.preprocessing, article_id, owner, status=status, values=values
                     )

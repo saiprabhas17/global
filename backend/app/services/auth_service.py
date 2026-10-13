@@ -86,14 +86,14 @@ async def authenticate_user(db: AsyncSession, redis: Redis, login_in: LoginReque
         )
         
     user = await user_repository.get_by_email(db, login_in.email)
-    if not user or not security.verify_password(user.hashed_password, login_in.password):
+    if not user or not user.is_active or not security.verify_password(user.hashed_password, login_in.password):
         raise generic_error
         
     return await _issue_tokens_and_session(db, user, device_info)
 
 async def rotate_refresh_token(db: AsyncSession, refresh_in: RefreshRequest, device_info: str | None) -> TokenResponse:
     token_hash = security.hash_refresh_token(refresh_in.refresh_token)
-    db_session = await session_repository.get_by_refresh_token_hash(db, token_hash)
+    db_session = await session_repository.get_by_refresh_token_hash(db, token_hash, for_update=True)
     
     if not db_session:
         raise credentials_exception
@@ -127,7 +127,7 @@ async def rotate_refresh_token(db: AsyncSession, refresh_in: RefreshRequest, dev
 
 async def logout_user(db: AsyncSession, redis: Redis, logout_in: LogoutRequest, current_user: User, auth_header: str | None) -> None:
     token_hash = security.hash_refresh_token(logout_in.refresh_token)
-    db_session = await session_repository.get_by_refresh_token_hash(db, token_hash)
+    db_session = await session_repository.get_by_refresh_token_hash(db, token_hash, for_update=True)
     
     now_utc = datetime.now(UTC)
     if db_session and not db_session.revoked and db_session.user_id == current_user.id:

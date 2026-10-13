@@ -1,4 +1,6 @@
-# GMEE Evaluation Report — Publication Grade
+# GMEE Historical Evaluation Report — Exploratory Weak Labels
+
+> Historical artifact: the original multi-signal machine-label methodology does not provide independently annotated publication evidence. Identical embedding baselines and sample counts do not establish validity. Values below are preserved as recorded; use [the current evaluation protocol](../docs/EVALUATION.md) and frozen human-held-out experiments.
 
 > Generated at: 2026-10-03T00:13:20.582894
 

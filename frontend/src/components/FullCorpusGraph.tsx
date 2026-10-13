@@ -102,11 +102,12 @@ const FullCorpusGraph: React.FC<{ setActiveTab?: (tab: TabType) => void }> = ({ 
     }
     if (query.trim()) {
       const q = query.toLowerCase();
-      const keep = new Set(nodesSrc.filter((n) => n.title.toLowerCase().includes(q)).map((n) => n.id));
-      // include direct neighbors of matches for context
+      const matches = new Set(nodesSrc.filter((n) => n.title.toLowerCase().includes(q)).map((n) => n.id));
+      const keep = new Set(matches);
+      // Only expand one hop from the original matches, independent of edge ordering.
       edgesSrc.forEach((e) => {
-        if (keep.has(e.src)) keep.add(e.dst);
-        if (keep.has(e.dst)) keep.add(e.src);
+        if (matches.has(e.src)) keep.add(e.dst);
+        if (matches.has(e.dst)) keep.add(e.src);
       });
       nodesSrc = nodesSrc.filter((n) => keep.has(n.id));
       edgesSrc = edgesSrc.filter((e) => keep.has(e.src) && keep.has(e.dst));

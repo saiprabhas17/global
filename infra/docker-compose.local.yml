@@ -1,0 +1,5 @@
+# The checked-in dependency constraints target Python 3.11/Linux x86-64 CPU.
+# On Apple Silicon Docker emulates this backend; other services stay native.
+services:
+  backend:
+    platform: linux/amd64

@@ -131,7 +131,7 @@ const CorpusExplorer: React.FC = () => {
             )}
           </div>
 
-          <form onSubmit={submitSearch} className="flex items-center gap-2">
+          <form onSubmit={submitSearch} className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
             <select
               aria-label="Corpus outlet filter"
               value={domain}
@@ -148,13 +148,13 @@ const CorpusExplorer: React.FC = () => {
                 </option>
               ))}
             </select>
-            <div className="flex items-center border border-hermes-bone/25 bg-hermes-panel-deep">
+            <div className="flex items-center min-w-0 border border-hermes-bone/25 bg-hermes-panel-deep">
               <input
                 aria-label="Corpus search query"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="search titles & authors…"
-                className="bg-transparent text-hermes-bone font-mono text-xs px-3 py-1.5 outline-none w-48 md:w-64 placeholder:text-hermes-bone/35"
+                className="bg-transparent text-hermes-bone font-mono text-xs px-3 py-1.5 outline-none w-full min-w-0 sm:w-48 md:w-64 placeholder:text-hermes-bone/35"
               />
               <button type="submit" aria-label="Search corpus" className="btn-brutal !py-1.5 !px-2.5 m-0.5">
                 <Search className="w-3.5 h-3.5" />

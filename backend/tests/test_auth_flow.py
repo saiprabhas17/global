@@ -18,6 +18,22 @@ from app.services.auth_service import (
 PW = "Str0ngPass!x"
 
 
+async def test_inactive_user_cannot_log_in(db_session, redis_client):
+    from sqlalchemy import select
+
+    from app.models.user import User
+
+    await register_user(db_session, UserCreate(email="inactive@example.com", password=PW), None)
+    user = await db_session.scalar(select(User).where(User.email == "inactive@example.com"))
+    assert user is not None
+    user.is_active = False
+    await db_session.commit()
+    with pytest.raises(HTTPException) as failure:
+        await authenticate_user(db_session, redis_client,
+            LoginRequest(email="inactive@example.com", password=PW), "127.0.0.1", None)
+    assert failure.value.status_code == 401
+
+
 async def test_register_issues_token_pair(db_session):
     res = await register_user(
         db_session,

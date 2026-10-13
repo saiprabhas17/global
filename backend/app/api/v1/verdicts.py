@@ -38,6 +38,12 @@ from app.services.verdict.evidence import (
     PassageSource,
     check_claim,
 )
+from app.services.verdict.external import (
+    ExternalAssessment,
+    ExternalCheckResult,
+    ExternalEvidenceUnavailableError,
+    check_external_claim,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +89,16 @@ class VerdictCheckEvidence(BaseModel):
     title: str
     domain: str | None
     published_at: datetime | None
-    similarity: float
+    similarity: float | None
     stance: Stance
     syndication_group: str
+    retrieval_method: Literal["vector", "keyword", "hybrid"] = "vector"
+    collected_at: datetime | None = None
+    extracted_at: datetime | None = None
+    passage_start: int | None = None
+    passage_end: int | None = None
+    passage_sha256: str = ""
+    abstention_reason: str | None = None
 
 
 class VerdictCheckResponse(BaseModel):
@@ -119,52 +132,45 @@ async def check_verdict(
         ) from exc
 
 
-@router.post("/check-external")
+class ExternalCheckSource(BaseModel):
+    title: str
+    url: str
+    passage: str
+    stance: Stance
+    abstention_reason: str | None
+    revision_id: int
+    published_at: datetime
+    retrieved_at: datetime
+    passage_start: int
+    passage_end: int
+    passage_sha256: str
+    source_group: str
+
+
+class ExternalCheckResponse(BaseModel):
+    claim: str
+    verdict: ExternalAssessment
+    assessment: ExternalAssessment
+    explanation: str
+    sources: list[ExternalCheckSource]
+    observed_at: datetime
+    method_version: str
+    warnings: list[str]
+
+
+@router.post("/check-external", response_model=ExternalCheckResponse)
 async def check_verdict_external(
     body: VerdictCheckBody,
     _current_user: User = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Authenticated, external web grounding using Wikipedia Action API."""
-    import urllib.parse
-
-    import httpx
-
-    from app.services.nlp.llm_client import get_llm_client
-    
-    query = urllib.parse.quote(body.claim_text[:100]) # use first 100 chars for search
-    url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&utf8=&format=json"
-    
+) -> ExternalCheckResult:
+    """Revision-bound Wikipedia passages; local NLI requires no hosted API key."""
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=10.0)
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as e:
-        logger.error(f"Wikipedia search failed: {e}")
-        raise HTTPException(status_code=503, detail="External search unavailable")
-        
-    search_results = data.get("query", {}).get("search", [])
-    if not search_results:
-        return {
-            "claim": body.claim_text,
-            "verdict": "UNVERIFIABLE",
-            "explanation": "No relevant external sources found.",
-            "sources": []
-        }
-        
-    # Build context from top 3 results
-    top_results = search_results[:3]
-    context = "\n\n".join([f"Source: Wikipedia - {r['title']}\nSnippet: {_v_clean(r['snippet'], 500)}" for r in top_results])
-    
-    llm = get_llm_client()
-    result = await llm.check_external_claim(body.claim_text, context)
-    
-    return {
-        "claim": body.claim_text,
-        "verdict": result.get("verdict", "UNVERIFIABLE"),
-        "explanation": result.get("explanation", ""),
-        "sources": [{"title": r["title"], "url": f"https://en.wikipedia.org/wiki/{urllib.parse.quote(r['title'])}"} for r in top_results]
-    }
+        return await check_external_claim(
+            body.claim_text, as_of=body.as_of, limit=body.limit
+        )
+    except ExternalEvidenceUnavailableError as exc:
+        logger.warning("External evidence unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 def _parse_evidence(value: Any) -> dict[str, Any] | None:

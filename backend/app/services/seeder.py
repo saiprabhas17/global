@@ -11,7 +11,7 @@ INITIAL_SOURCES = [
     {
         "name": "BBC News (World)",
         "type": SourceTypeEnum.rss,
-        "url_or_identifier": "http://feeds.bbci.co.uk/news/world/rss.xml",
+        "url_or_identifier": "https://feeds.bbci.co.uk/news/world/rss.xml",
     },
     {
         "name": "NewsAPI (Misinformation)",

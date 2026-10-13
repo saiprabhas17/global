@@ -71,12 +71,14 @@ def _mutation_fixtures() -> _MutationFixture:
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_guards():
+async def test_orchestrator_guards(monkeypatch):
     settings = get_settings()
     settings.MIN_CORPUS_SIZE_FOR_CLUSTERING = 30
     settings.MIN_NEW_CLAIMS_TO_RECLUSTER = 10
 
     orchestrator = EvolutionOrchestrator()
+    projection = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(orchestrator.neo4j_writer, "sync_persisted_graph", projection)
 
     # 1. Test small corpus guard
     mock_db = AsyncMock()
@@ -86,6 +88,7 @@ async def test_orchestrator_guards():
     res = await orchestrator.run_evolution_cycle(mock_db)
     assert res["status"] == "insufficient_data"
     assert res["claims_available"] == 20
+    projection.assert_awaited_once_with(mock_db)
 
     # 2. Test debounce guard
     mock_db.scalar.side_effect = [
@@ -168,7 +171,11 @@ async def test_mutation_detector_logic():
         child = fx.claims_by_id[edge.from_claim_id]
         parent = fx.claims_by_id[edge.to_claim_id]
         assert child.article_id != parent.article_id
-        assert fx.articles_by_id[parent.article_id].published_at < fx.articles_by_id[child.article_id].published_at
+        parent_time = fx.articles_by_id[parent.article_id].published_at
+        child_time = fx.articles_by_id[child.article_id].published_at
+        assert parent_time is not None and child_time is not None
+        assert parent_time < child_time
+        assert edge.mutation_evidence is not None
         assert edge.mutation_evidence["meaningful_change"] is True
         assert edge.mutation_evidence["observed_propagation"] is False
         assert "NUMERIC_DRIFT" in edge.mutation_evidence["mutation_types"]
@@ -190,6 +197,9 @@ async def test_neo4j_writer_idempotency():
         mock_driver = AsyncMock()
         mock_get_driver.return_value = mock_driver
         mock_session = AsyncMock()
+        async def execute_write(callback, *args):
+            return await callback(mock_session, *args)
+        mock_session.execute_write.side_effect = execute_write
         # driver.session() is a SYNC factory returning an async context manager;
         # on a plain AsyncMock the call itself would become a coroutine.
         mock_session_cm = AsyncMock()
@@ -218,10 +228,10 @@ async def test_neo4j_writer_idempotency():
         # claims, PUBLISHED_BY, SIMILAR_TO).
         calls = mock_session.run.call_args_list
         assert len(calls) > 0
-        assert len(calls) <= 6
+        assert len(calls) <= 12
         for call in calls:
             query = call[0][0]
-            assert "MERGE" in query
+            assert "MERGE" in query or "DELETE" in query
             assert "UNWIND" in query
 
 
@@ -239,6 +249,9 @@ async def test_neo4j_writer_prunes_stale_evolved_edges():
         mock_driver = AsyncMock()
         mock_get_driver.return_value = mock_driver
         mock_session = AsyncMock()
+        async def execute_write(callback, *args):
+            return await callback(mock_session, *args)
+        mock_session.execute_write.side_effect = execute_write
         mock_session_cm = AsyncMock()
         mock_session_cm.__aenter__.return_value = mock_session
         mock_driver.session = MagicMock(return_value=mock_session_cm)
@@ -265,7 +278,7 @@ async def test_neo4j_writer_prunes_stale_evolved_edges():
         assert res is True
 
         calls = mock_session.run.call_args_list
-        prune_calls = [c for c in calls if "DELETE r" in c[0][0]]
+        prune_calls = [c for c in calls if "DELETE r" in c[0][0] and "EVOLVED_FROM" in c[0][0]]
         assert len(prune_calls) == 1
         prune_kwargs = prune_calls[0][1]
         assert set(prune_kwargs["claim_ids"]) == {str(c0.id), str(c1.id)}

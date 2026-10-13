@@ -7,8 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.session import Session
 
 
-async def get_by_refresh_token_hash(db: AsyncSession, token_hash: str) -> Session | None:
-    result = await db.execute(select(Session).where(Session.refresh_token_hash == token_hash))
+async def get_by_refresh_token_hash(
+    db: AsyncSession, token_hash: str, *, for_update: bool = False
+) -> Session | None:
+    statement = select(Session).where(Session.refresh_token_hash == token_hash)
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    result = await db.execute(statement)
     return result.scalars().first()
 
 async def create(db: AsyncSession, user_id: uuid.UUID, refresh_token_hash: str, device_info: str | None, expires_at: datetime) -> Session:

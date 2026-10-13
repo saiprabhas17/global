@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 from sqlalchemy import text
 
 from app.api.deps import get_current_user
@@ -33,6 +33,9 @@ class MutationCompareRequest(BaseModel):
     newer_text: str = Field(min_length=1, max_length=2000)
     older_timestamp: datetime | None = None
     newer_timestamp: datetime | None = None
+    context_note: str | None = Field(default=None, max_length=2000)
+    provenance_url: HttpUrl | None = None
+    include_summary: bool = False
 
     @field_validator("older_text", "newer_text")
     @classmethod
@@ -52,6 +55,7 @@ async def get_timeline_mutation_summary(payload: MutationSummaryRequest) -> dict
     from sqlalchemy import select
 
     from app.db.postgres import async_session_maker
+    from app.models.article import Article
     from app.models.claim import Claim
     from app.services.nlp.llm_client import get_llm_client
     
@@ -69,7 +73,9 @@ async def get_timeline_mutation_summary(payload: MutationSummaryRequest) -> dict
     async with async_session_maker() as db:
         claims_stmt = (
             select(Claim.claim_text)
+            .join(Article, Claim.article_id == Article.id)
             .where(Claim.article_id.in_(valid_ids))
+            .order_by(Article.published_at.asc().nulls_last(), Claim.id)
             .limit(50)
         )
         claims = list((await db.scalars(claims_stmt)).all())
@@ -89,16 +95,24 @@ async def compare_mutations(payload: MutationCompareRequest) -> dict[str, Any]:
         analyze_text_change, payload.older_text, payload.newer_text,
         older_timestamp=payload.older_timestamp,
         newer_timestamp=payload.newer_timestamp,
+        context_note=payload.context_note,
+        provenance_url=str(payload.provenance_url) if payload.provenance_url else None,
     )
-    
-    llm = get_llm_client()
-    try:
-        llm_summary = await llm.generate_mutation_summary([payload.older_text, payload.newer_text])
-    except Exception as e:
-        logger.error(f"Failed to generate LLM summary for mutation: {e}")
-        llm_summary = None
+    llm_summary = None
+    summary_status = "not_requested"
+    if payload.include_summary:
+        try:
+            llm = get_llm_client()
+            llm_summary = await asyncio.wait_for(
+                llm.generate_mutation_summary([payload.older_text, payload.newer_text]),
+                timeout=30,
+            )
+            summary_status = "available"
+        except Exception:
+            logger.exception("Failed to generate optional mutation summary")
+            summary_status = "unavailable"
         
-    return {"analysis": analysis, "llm_summary": llm_summary}
+    return {"analysis": analysis, "llm_summary": llm_summary, "summary_status": summary_status}
 
 
 _TAG_RE = re.compile(r"<[^a-z/!]|</?[a-z][^>]*>", re.IGNORECASE)
@@ -392,7 +406,7 @@ async def timeline_clusters(
                 """
                 MATCH (a:Article)-[:SIMILAR]-(b:Article)
                 WITH a, count(b) AS deg
-                WHERE deg >= 3
+                WHERE deg >= 1
                 MATCH (a)-[s:SIMILAR]-(n:Article)
                 WITH a, a.title AS title, a.domain AS domain, a.url AS url,
                      a.publishedAt AS published_at, deg,

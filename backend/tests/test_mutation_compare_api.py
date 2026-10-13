@@ -11,7 +11,7 @@ from app.main import app
 from app.models.user import RoleEnum, User
 
 
-def _authenticate(monkeypatch):
+def _authenticate(monkeypatch) -> None:
     monkeypatch.setitem(
         app.dependency_overrides,
         get_current_user,

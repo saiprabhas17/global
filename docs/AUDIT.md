@@ -1,5 +1,9 @@
 # GMEE Phased Audit & Acceptance
 
+The dated infrastructure audit below is historical. See [Verification](VERIFICATION.md)
+for the subsequently executed source repairs, model/database/browser/pipeline checks
+and remaining external/scientific requirements.
+
 **Audit date:** 2026-10-03. **Conclusion:** infrastructure safeguards and validation
 mechanisms are implemented; a complete production rollout and scientific
 validation are **not claimed**. Main/backend/frontend agents reconcile API and

@@ -1,7 +1,9 @@
 """Corpus evidence tests with mocked models and database, never live pgvector."""
 
+import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
@@ -21,7 +23,7 @@ QUERY = "The council approved the new bridge."
 VECTOR = [1.0] + [0.0] * 767
 
 
-def corpus_row(index=1, **overrides):
+def corpus_row(index=1, **overrides) -> dict[str, Any]:
     row = {
         "claim_id": str(UUID(int=index)),
         "article_id": str(UUID(int=1000 + index)),
@@ -42,7 +44,7 @@ def corpus_row(index=1, **overrides):
     return row
 
 
-def fake_db(rows):
+def fake_db(rows) -> Mock:
     result = Mock()
     result.mappings.return_value.all.return_value = rows
     result.mappings.return_value.first.return_value = rows[0] if rows else None
@@ -289,7 +291,7 @@ async def test_candidate_and_nli_work_are_bounded_and_vectors_bound(monkeypatch)
     assert "UPDATE" not in str(statement)
 
 
-def json_vector_length(value):
+def json_vector_length(value) -> int:
     import json
 
     return len(json.loads(value))
@@ -334,7 +336,7 @@ async def test_unavailable_nli_propagates_not_fake_neutral_or_support(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_embedding_unavailable_does_not_attempt_loading_or_db(monkeypatch):
+async def test_embedding_unavailable_uses_disclosed_keyword_retrieval(monkeypatch):
     from app.services.nlp.embedding_service import EmbeddingService
 
     generate = Mock(side_effect=RuntimeError("not loaded"))
@@ -342,10 +344,55 @@ async def test_embedding_unavailable_does_not_attempt_loading_or_db(monkeypatch)
     monkeypatch.setattr(EmbeddingService, "generate_embedding", generate)
     monkeypatch.setattr(EmbeddingService, "load_model", load)
     db = fake_db([])
-    with pytest.raises(evidence.EmbeddingUnavailableError, match="EMBEDDING_MODEL"):
-        await evidence.check_claim(db, QUERY)
+    result = await evidence.check_claim(db, QUERY)
     load.assert_not_called()
-    db.execute.assert_not_awaited()
+    db.execute.assert_awaited_once()
+    assert db.execute.call_args.args[1]["embedding"] is None
+    assert any("keyword retrieval was used" in item for item in result["warnings"])
+    assert result["assessment"] == "INSUFFICIENT_EVIDENCE"
+
+
+@pytest.mark.asyncio
+async def test_keyword_only_hit_can_supply_traceable_evidence(monkeypatch):
+    body = "  The council approved the new bridge. This is the published text.  "
+    row = corpus_row(similarity=None, lexical_score=0.12, cleaned_content=body)
+    monkeypatch.setattr(
+        evidence, "classify_stance", AsyncMock(return_value=StanceResult("entailment"))
+    )
+    result = await evidence.check_claim_with_embedding(
+        fake_db([row]), QUERY, None, observed_at=NOW
+    )
+    item = result["evidence"][0]
+    assert result["assessment"] == "SUPPORTED_BY_CORPUS"
+    assert item["similarity"] is None
+    assert item["retrieval_method"] == "keyword"
+    assert body[item["passage_start"] : item["passage_end"]] == item["passage"]
+    assert item["passage_sha256"] == hashlib.sha256(item["passage"].encode()).hexdigest()
+    assert item["collected_at"] == PAST
+    assert item["extracted_at"] == PAST
+
+
+@pytest.mark.asyncio
+async def test_hybrid_ranking_preserves_time_filter_in_both_channels(monkeypatch):
+    db = fake_db([
+        corpus_row(1, similarity=0.99, retrieval_score=0.015),
+        corpus_row(2, similarity=0.8, lexical_score=0.5, retrieval_score=0.03),
+    ])
+    monkeypatch.setattr(
+        evidence, "classify_stance", AsyncMock(return_value=StanceResult("neutral"))
+    )
+    result = await evidence.check_claim_with_embedding(db, QUERY, VECTOR, observed_at=NOW)
+    assert [item["claim_id"] for item in result["evidence"]] == [
+        str(UUID(int=2)), str(UUID(int=1))
+    ]
+    assert result["evidence"][0]["retrieval_method"] == "hybrid"
+    sql, params = db.execute.call_args.args
+    for channel in str(sql).split("), fused AS")[0].split("), keyword_hits AS"):
+        assert "c.extracted_at <= :cutoff" in channel
+        assert "a.collected_at <= :cutoff" in channel
+        assert channel.index("a.published_at <= :cutoff") < channel.index("LIMIT :candidate_limit")
+    assert QUERY not in str(sql)
+    assert params["lexical_query"] == "the OR council OR approved OR new OR bridge"
 
 
 @pytest.mark.parametrize(

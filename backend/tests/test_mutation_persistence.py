@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -22,13 +23,13 @@ from app.services.evolution.text_changes import analyze_text_change
 NOW = datetime(2026, 9, 20, tzinfo=UTC)
 
 
-def _database_uuid(n):
+def _database_uuid(n) -> uuid.UUID:
     # SQLite gives native UUID columns NUMERIC affinity. An all-digit UUID
     # would round-trip as an integer instead of text; use deterministic hex.
     return uuid.UUID(f"abcdef00-0000-0000-0000-{n:012x}")
 
 
-def _migration():
+def _migration() -> Any:
     path = (
         Path(__file__).resolve().parents[1]
         / "alembic"

@@ -3,6 +3,18 @@ import { apiClient, type ApiRequestOptions } from './client';
 export type EvalLabel = 'SAME_STORY' | 'EVOLVED' | 'DISTINCT';
 export type EvalStrategy = 'coverage' | 'uncertainty';
 export type EvalSplit = 'unassigned' | 'train' | 'dev' | 'test';
+export type ContextRelation = 'PARAPHRASE' | 'UPDATE_OR_CORRECTION' | 'INCOMPATIBLE_ASSERTION' | 'INSUFFICIENT_CONTEXT' | 'UNRELATED';
+export interface EvalChangedSpan {
+  side: 'a' | 'b'; start: number; end: number; text: string; mutation_type: string;
+}
+export interface EvalRubric {
+  version: string;
+  labels: Record<EvalLabel, string>;
+  context_relations: Record<ContextRelation, string>;
+  mutation_types: string[];
+  span_offsets: string;
+  guidance: string[];
+}
 
 export interface EvalClaimSide { text: string; domain: string | null }
 export interface EvalPair { pair_id: string; a: EvalClaimSide; b: EvalClaimSide }
@@ -29,13 +41,21 @@ export interface EvalProgress {
   warning?: string;
   warnings?: string[];
 }
-export interface EvalAnnotation { mutation_types?: string[]; notes?: string }
+export interface EvalAnnotation {
+  mutation_types?: string[]; notes?: string;
+  changed_spans?: EvalChangedSpan[];
+  context_relation?: ContextRelation;
+  rubric_version?: string;
+}
 export interface EvalLabelResult {
   status: string; pair_id: string; label: string;
   annotator?: string; origin?: string; mutation_types?: string[] | null; notes?: string | null;
 }
 
 export const evalApi = {
+  rubric: (options?: ApiRequestOptions) => apiClient.get<EvalRubric>('/eval/rubric', { ...options, authenticated: true }),
+  reviewNext: (split: EvalSplit = 'unassigned', options?: ApiRequestOptions) =>
+    apiClient.get<EvalNext>(`/eval/review/next?${new URLSearchParams({ split })}`, { ...options, authenticated: true }),
   next: (strategy: EvalStrategy, split: EvalSplit = 'unassigned', options?: ApiRequestOptions) =>
     apiClient.get<EvalNext>(`/eval/next?${new URLSearchParams({ strategy, split })}`, { ...options, authenticated: true }),
   label: (pairId: string, label: EvalLabel, annotation: EvalAnnotation = {}) =>

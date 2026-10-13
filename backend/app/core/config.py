@@ -86,11 +86,14 @@ class Settings(BaseSettings):
     # re-embedding the whole corpus (scripts/embed_articles.py) or the
     # vector spaces are incomparable.
     EMBEDDING_MODEL: str = "all-mpnet-base-v2"
+    NLI_MODEL: str = "cross-encoder/nli-deberta-v3-base"
+    NLI_MODEL_REVISION: str | None = None
+    NLI_CONFIDENCE_MIN: float = Field(default=0.7, ge=0.0, le=1.0, allow_inf_nan=False)
 
     # Process model: run the APScheduler inside this process (dev / single
     # node). Set to false for API-only replicas and run scripts/run_nlp_cycle.py
     # as a separate process so heavy cycles never restart with the API.
-    ENABLE_SCHEDULER: bool = True
+    ENABLE_SCHEDULER: bool = False
 
     # Rate limiting. Disable in the test suite (tests share one IP and would
     # trip the login limiter against each other / against dev usage).

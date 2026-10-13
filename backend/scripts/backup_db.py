@@ -140,7 +140,8 @@ def readonly_env(password: str | None) -> dict[str, str]:
 
 
 def run(cmd: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8")
+    # Callers inspect returncode to produce actionable errors and clean partial dumps.
+    return subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8", check=False)
 
 
 def sha256_of(path: Path) -> str:

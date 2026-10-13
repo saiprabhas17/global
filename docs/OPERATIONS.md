@@ -66,7 +66,8 @@ publish PostgreSQL, Neo4j, Redis or the API to all interfaces.
 |----------|-----------------------------------|
 | `gmee01` | Nullable typed mutation evidence and one `EVOLVED_FROM` parent per child. Historical multiple-parent conflicts fail preflight; they are not silently deleted. NULL legacy evidence is not backfilled scientific proof. |
 | `gmee02` | Origins (`human`, `automatic`, `legacy`, `test`), authenticated annotator IDs, label history, canonical pairs, splits and event identity. Existing votes remain conservative `legacy`; migration does not turn old handles into human gold. |
-| `gmee03` | Pipeline ownership/lease and durable job records in the main backend upgrade. Reconcile the final schema and recovery contract before rollout. |
+| `gmee03` | Pipeline ownership/lease and durable job records. |
+| `gmee04` | Migrated article vectors/HNSW and claim full-text/GIN search; preserves prior manually populated vectors. |
 
 Alembic migrations are not a replica-coordination mechanism. This deployment is
 single-process/single-API-container by default. A future multi-replica rollout
@@ -242,3 +243,9 @@ redact bodies/tokens and return nonzero on failure. Reports are opt-in with
 `-ReportPath` and refuse overwrite. They do not render a browser, register users
 or create scientific labels. Browser interaction/accessibility E2E requires a
 separate approved dependency/test setup; no Playwright package was added.
+
+Current local runtime/model verification is recorded in [Verification](VERIFICATION.md).
+Register an ordinary account, then use `python scripts/set_user_role.py --email
+ACCOUNT --role admin` from backend with private operator database configuration
+to provision an administrator. The UI exposes bounded pipeline controls and
+recovery preview to administrators; public registration cannot grant the role.

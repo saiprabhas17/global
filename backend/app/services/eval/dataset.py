@@ -12,12 +12,14 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.orm import aliased
 
 from app.models.article import Article
 from app.models.claim import Claim, ClaimEntity
 from app.models.eval import EvalPair, EvalPairLabel
+from app.services.eval.annotation import ChangedSpan, ContextRelation, validate_spans
 from app.services.eval.features import FEATURE_VERSION, entity_jaccard, lexical_jaccard
 from app.services.eval.provenance import (
     CONSENSUS_RULE,
@@ -132,6 +134,8 @@ async def collect_export_records(db: Any, dataset_version: str) -> list[dict[str
             },
             "gold_label": result["label"],
             "gold_mutation_types": result["mutation_types"],
+            "gold_context_relation": result["context_relation"],
+            "gold_changed_spans": result["changed_spans"],
             "consensus": result,
             "human_labels": [v for v in votes if human_identity(v) is not None],
             "labels": votes,
@@ -256,6 +260,21 @@ def validate_record(record: dict[str, Any]) -> None:
             raise DatasetError(f"Pair {pid}: gold_mutation_types must be null or at most 16 bounded strings")
         if result["mutation_status"] != "agreed" or sorted(set(mutations)) != result["mutation_types"]:
             raise DatasetError(f"Pair {pid}: mutation gold also requires independently agreeing human mutation annotations; omit unresolved mutation gold")
+    for field in ("context_relation", "changed_spans"):
+        value = record.get(f"gold_{field}")
+        if value is None:
+            continue
+        if result[f"{field}_status"] != "agreed" or value != result[field]:
+            raise DatasetError(f"Pair {pid}: {field} gold requires independently agreeing human annotations under the same rubric")
+        try:
+            if field == "context_relation":
+                TypeAdapter(ContextRelation).validate_python(value)
+            else:
+                if not isinstance(value, list) or len(value) > 32:
+                    raise ValueError("expected at most 32 changed spans")
+                validate_spans([ChangedSpan.model_validate(span) for span in value], record["text_a"], record["text_b"])
+        except (ValidationError, ValueError) as exc:
+            raise DatasetError(f"Pair {pid}: invalid {field} annotation: {exc}") from exc
     features = record.get("features", {})
     if not isinstance(features, dict) or set(features) - {"lexical_jaccard", "entity_jaccard"}:
         raise DatasetError(f"Pair {pid}: supported optional features are lexical_jaccard and entity_jaccard only")

@@ -60,6 +60,8 @@ async def test_nlp_orchestrator_success(db_session, mock_llm_client):
     # Check DB
     await db_session.refresh(article)
     assert article.nlp_status == NLPStatusEnum.completed
+    assert article.embedding is not None
+    assert len(article.embedding) == 768
     
     # Check claim exists
     from sqlalchemy import select
@@ -92,12 +94,16 @@ async def test_nlp_orchestrator_empty_claims(db_session, mock_llm_client):
     mock_llm_client.extract_claims.return_value = []
     
     orchestrator = NLPOrchestrator(llm_client=mock_llm_client)
-    summary = await orchestrator.run_nlp_cycle(db_session)
+    with patch("app.services.nlp.embedding_service.EmbeddingService.generate_document_embedding",
+               return_value=[0.1] * 768):
+        summary = await orchestrator.run_nlp_cycle(db_session, chain_evolution=False)
     
     assert summary.total_processed == 1
     assert summary.claims_extracted == 0
     assert summary.llm_calls_made == 1
     assert summary.status_counts[NLPStatusEnum.completed.value] == 1
+    await db_session.refresh(article)
+    assert article.embedding is not None
 
 
 async def test_nlp_orchestrator_failure_recovery(db_session, mock_llm_client):
@@ -199,3 +205,12 @@ async def test_nlp_orchestrator_llm_failure_marks_failed(db_session):
     assert summary.total_processed == 1
     assert summary.status_counts[NLPStatusEnum.failed.value] == 1
     assert summary.llm_calls_made == 0
+
+
+@pytest.fixture(autouse=True)
+def isolated_graph_projection(monkeypatch: pytest.MonkeyPatch):
+    """Pipeline unit tests do not contact a live Neo4j projection."""
+    from unittest.mock import AsyncMock
+
+    from app.services.evolution.neo4j_writer import Neo4jWriter
+    monkeypatch.setattr(Neo4jWriter, "sync_persisted_graph", AsyncMock(return_value={"success": True}))

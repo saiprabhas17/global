@@ -56,8 +56,7 @@ def test_typed_changes_and_exact_source_spans(older, newer, expected):
     assert analysis["observed_propagation"] is False
     assert any(c["mutation_type"] == expected for c in analysis["changes"])
     for change in analysis["changed_spans"] + analysis["changes"]:
-        for field, original in (("older_span", older), ("newer_span", newer)):
-            span = change[field]
+        for span, original in ((change["older_span"], older), (change["newer_span"], newer)):
             assert 0 <= span["start"] <= span["end"] <= len(original)
             assert original[span["start"] : span["end"]] == span["text"]
     assert analysis == analyze_text_change(older, newer)
@@ -170,6 +169,8 @@ def test_naive_and_offset_timestamps_are_normalized_to_utc():
         newer_timestamp=datetime(2026, 9, 20, 14, tzinfo=timezone(timedelta(hours=1))),
     )
     assert analysis["lag_seconds"] == 3600
+    assert analysis["older_timestamp"] is not None
+    assert analysis["newer_timestamp"] is not None
     assert analysis["older_timestamp"].endswith("+00:00")
     assert analysis["newer_timestamp"].endswith("+00:00")
 

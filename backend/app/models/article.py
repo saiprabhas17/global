@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -63,6 +64,8 @@ class Article(Base):
         nullable=False,
         server_default="pending"
     )
+    # Article search is part of the migrated schema, not a backfill-script side effect.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
 
     # Durable pipeline ownership (gmee03). Set atomically when a worker claims
     # the row for preprocessing/NLP; final writes are fenced on ``claimed_by``.

@@ -13,7 +13,9 @@ on:
       - 'ARCHITECTURE.md'
       - 'CHANGELOG.md'
       - 'verify_endpoints.ps1'
-      - '_ui_sweep.ps1'
+      - 'scripts/**'
+      - 'Start-GMEE.bat'
+      - 'START-HERE.md'
   pull_request:
     paths:
       - 'backend/**'
@@ -26,7 +28,9 @@ on:
       - 'ARCHITECTURE.md'
       - 'CHANGELOG.md'
       - 'verify_endpoints.ps1'
-      - '_ui_sweep.ps1'
+      - 'scripts/**'
+      - 'Start-GMEE.bat'
+      - 'START-HERE.md'
 
 permissions:
   contents: read

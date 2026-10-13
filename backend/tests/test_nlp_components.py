@@ -23,6 +23,7 @@ def test_entity_extractor():
     for entity in entities:
         assert text[entity.start_char:entity.end_char] == entity.entity_text
 
+@pytest.mark.model
 def test_embedding_service():
     EmbeddingService.load_model()
     service = EmbeddingService()

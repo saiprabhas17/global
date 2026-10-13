@@ -9,10 +9,20 @@ from app.api.deps import get_current_user, get_db_session, require_role
 from app.models.evolution import ClaimClusterRun
 from app.models.pipeline import JobTypeEnum
 from app.models.user import RoleEnum, User
+from app.services.evolution.neo4j_writer import Neo4jWriter
 from app.services.evolution.orchestrator import EvolutionOrchestrator
 from app.services.pipeline.jobs import JobAlreadyRunning, run_job
 
 router = APIRouter()
+
+
+@router.post("/graph/sync", dependencies=[Depends(require_role(RoleEnum.admin))])
+async def reconcile_graph(db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    """Rebuild the bounded graph projection from authoritative persisted records."""
+    result = await Neo4jWriter().sync_persisted_graph(db)
+    if not result["success"]:
+        raise HTTPException(status_code=503, detail=result)
+    return result
 
 
 @router.post("/trigger")
@@ -84,7 +94,7 @@ async def get_clusters(db: AsyncSession = Depends(get_db_session)) -> Any:
 async def get_cluster_mutation_summary(topic_id: int, db: AsyncSession = Depends(get_db_session)) -> Any:
     """Generates an LLM summary of how claims in this topic cluster mutated over time."""
     from app.models.article import Article
-    from app.models.nlp import Claim
+    from app.models.claim import Claim
     from app.services.nlp.llm_client import get_llm_client
     
     # Fetch claims in the topic ordered by time

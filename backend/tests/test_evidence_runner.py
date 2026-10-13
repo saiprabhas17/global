@@ -1,6 +1,7 @@
 """Batch runner regression tests, without live storage or model inference."""
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -12,7 +13,7 @@ from tests.test_evidence_api import response_payload
 from tests.test_evidence_check import QUERY, VECTOR, fake_db
 
 
-def stored_claim(embedding=VECTOR):
+def stored_claim(embedding=VECTOR) -> dict[str, Any]:
     return {
         "id": str(UUID(int=10)),
         "article_id": str(UUID(int=1010)),

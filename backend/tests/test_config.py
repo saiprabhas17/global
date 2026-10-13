@@ -1,5 +1,8 @@
 import os
 
+import pytest
+from pydantic import ValidationError
+
 from app.core.config import Settings
 
 
@@ -73,3 +76,19 @@ def test_verdict_calibration_knobs_are_declared(monkeypatch) -> None:
     settings = Settings()  # type: ignore
     assert 0.0 < settings.VERDICT_STRONG_SIMILARITY <= 1.0
     assert settings.VERDICT_NEAR_MIN < settings.VERDICT_NEAR_MAX
+
+
+def test_nli_configuration_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in _BASE_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("NLI_MODEL", "example/stance-model")
+    monkeypatch.setenv("NLI_MODEL_REVISION", "reviewed-revision")
+    monkeypatch.setenv("NLI_CONFIDENCE_MIN", "0.85")
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.NLI_MODEL == "example/stance-model"
+    assert settings.NLI_MODEL_REVISION == "reviewed-revision"
+    assert settings.NLI_CONFIDENCE_MIN == 0.85
+    for invalid in ("nan", "inf", "-0.1", "1.1"):
+        monkeypatch.setenv("NLI_CONFIDENCE_MIN", invalid)
+        with pytest.raises(ValidationError):
+            Settings()  # type: ignore[call-arg]

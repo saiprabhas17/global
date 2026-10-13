@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
@@ -66,19 +67,23 @@ class NLPOrchestrator:
         )
         rows = (
             await db.execute(
-                select(Article.id, Article.cleaned_content, Article.content).where(
+                select(Article.id, Article.title, Article.cleaned_content, Article.content).where(
                     Article.id.in_(claimed_ids)
                 )
             )
         ).all()
         texts = {row.id: (row.cleaned_content or row.content) for row in rows}
+        titles = {row.id: row.title for row in rows}
 
         try:
             for index, article_id in enumerate(claimed_ids):
                 if index:
                     # Heartbeat between (potentially slow) LLM calls.
                     await extend_claims(db, Stage.nlp, owner)
-                await self._process_one(db, article_id, texts.get(article_id), owner, summary)
+                await self._process_one(
+                    db, article_id, texts.get(article_id), owner, summary,
+                    title=titles.get(article_id, ""),
+                )
         finally:
             # Anything still claimed (e.g. cancellation) goes back to the queue.
             released = await release_unfinished(db, Stage.nlp, owner)
@@ -106,13 +111,16 @@ class NLPOrchestrator:
     async def _process_one(
         self,
         db: AsyncSession,
-        article_id: object,
+        article_id: uuid.UUID,
         text_to_process: str | None,
         owner: str,
         summary: NLPSummary,
+        *,
+        title: str = "",
     ) -> None:
         try:
             new_claims: list[Claim] = []
+            article_embedding: list[float] | None = None
             if text_to_process:
                 extracted_claims_data = await self.llm_client.extract_claims(text_to_process)
                 summary.llm_calls_made += 1
@@ -141,11 +149,20 @@ class NLPOrchestrator:
                         ))
                     new_claims.append(claim_model)
 
+                # Corpus search must index processed articles even when no
+                # check-worthy claims were found (e.g. an opinion piece).
+                article_embedding = await asyncio.to_thread(
+                    EmbeddingService.generate_document_embedding,
+                    f"{title}. {text_to_process}" if title else text_to_process,
+                    allow_load=True,
+                )
+
             # Fenced status write first, then claims, in ONE transaction: if
             # ownership was lost the rollback discards these claims too.
             won = await finish_article(
-                db, Stage.nlp, article_id, owner,  # type: ignore[arg-type]
+                db, Stage.nlp, article_id, owner,
                 status=NLPStatusEnum.completed, commit=False,
+                values={"embedding": article_embedding} if article_embedding is not None else None,
             )
             if not won:
                 summary.lost_ownership += 1
@@ -163,7 +180,7 @@ class NLPOrchestrator:
             error = sanitize_error(e)
             try:
                 await finish_article(
-                    db, Stage.nlp, article_id, owner,  # type: ignore[arg-type]
+                    db, Stage.nlp, article_id, owner,
                     status=NLPStatusEnum.failed, error=error,
                 )
             except Exception as fallback_e:

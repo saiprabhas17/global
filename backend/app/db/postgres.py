@@ -6,7 +6,9 @@ settings = get_settings()
 
 engine = create_async_engine(
     settings.POSTGRES_URL,
-    echo=settings.ENVIRONMENT == "development",
+    # SQL parameters contain password hashes, token hashes and private text.
+    # Development must follow the same credential-redaction policy as serving.
+    echo=False,
     future=True
 )
 

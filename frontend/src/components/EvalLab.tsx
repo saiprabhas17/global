@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardCheck, Scale, GitBranch, Unlink, Download } from 'lucide-react';
-import { evalApi, EvalLabel, EvalPair, type EvalStrategy, type EvalSplit } from '../api/eval';
+import { evalApi, EvalLabel, EvalPair, type EvalStrategy, type EvalSplit, type EvalAnnotation, type EvalChangedSpan, type ContextRelation } from '../api/eval';
 import { useSession } from '../lib/session';
 import { usePollingPolicy } from '../lib/polling';
 import { downloadApiResponse } from '../lib/download';
@@ -51,10 +51,13 @@ const LABEL_META: Array<{
   },
 ];
 
-const ClaimCard: React.FC<{ side: 'A' | 'B'; text: string; domain: string | null }> = ({
+type SpanSelection = Omit<EvalChangedSpan, 'mutation_type'>;
+
+const ClaimCard: React.FC<{ side: 'A' | 'B'; text: string; domain: string | null; onSelectSpan: (selection: SpanSelection | null) => void }> = ({
   side,
   text,
   domain,
+  onSelectSpan,
 }) => (
   <div className="border border-hermes-bone/15 bg-hermes-panel-deep p-5 flex flex-col gap-3 flex-1">
     <div className="flex items-center gap-2">
@@ -63,7 +66,17 @@ const ClaimCard: React.FC<{ side: 'A' | 'B'; text: string; domain: string | null
       </span>
       <span className="font-mono text-[10px] text-hermes-bone/45 truncate">{domain}</span>
     </div>
-    <p className="text-base leading-relaxed text-hermes-bone/90">&ldquo;{text}&rdquo;</p>
+    <textarea aria-label={`Claim ${side} text; select a changed span`} readOnly value={text} rows={5}
+      className="field-brutal w-full text-base leading-relaxed text-hermes-bone/90"
+      onSelect={(event) => {
+        const { selectionStart, selectionEnd } = event.currentTarget;
+        onSelectSpan(selectionStart === selectionEnd ? null : {
+          side: side === 'A' ? 'a' : 'b',
+          start: Array.from(text.slice(0, selectionStart)).length,
+          end: Array.from(text.slice(0, selectionEnd)).length,
+          text: text.slice(selectionStart, selectionEnd),
+        });
+      }} />
   </div>
 );
 
@@ -73,7 +86,8 @@ const PairView: React.FC<{
   onLabeled: (label: EvalLabel) => void;
   pending: boolean;
   justLabeled: EvalLabel | null;
-}> = ({ pair, annotator, onLabeled, pending, justLabeled }) => {
+  onSelectSpan: (selection: SpanSelection | null) => void;
+}> = ({ pair, annotator, onLabeled, pending, justLabeled, onSelectSpan }) => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (pending || !annotator) return;
@@ -90,8 +104,8 @@ const PairView: React.FC<{
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col lg:flex-row gap-4">
-        <ClaimCard side="A" text={pair.a.text} domain={pair.a.domain} />
-        <ClaimCard side="B" text={pair.b.text} domain={pair.b.domain} />
+        <ClaimCard side="A" text={pair.a.text} domain={pair.a.domain} onSelectSpan={onSelectSpan} />
+        <ClaimCard side="B" text={pair.b.text} domain={pair.b.domain} onSelectSpan={onSelectSpan} />
       </div>
 
       {justLabeled && (
@@ -131,18 +145,25 @@ export const EvalLab: React.FC = () => {
   const polling = usePollingPolicy(30000);
   const [strategy, setStrategy] = useState<EvalStrategy>('coverage');
   const [split, setSplit] = useState<EvalSplit>('unassigned');
+  const [reviewMode, setReviewMode] = useState(false);
   const [mutationTypes, setMutationTypes] = useState('');
+  const [contextRelation, setContextRelation] = useState<ContextRelation | ''>('');
+  const [changedSpans, setChangedSpans] = useState<EvalChangedSpan[]>([]);
+  const [spanSelection, setSpanSelection] = useState<SpanSelection | null>(null);
+  const [spanType, setSpanType] = useState('');
+  const [spansReviewed, setSpansReviewed] = useState(false);
   const [notes, setNotes] = useState('');
   const [annotationError, setAnnotationError] = useState('');
   const [datasetVersion, setDatasetVersion] = useState('');
   const [publication, setPublication] = useState(false);
   const [justLabeled, setJustLabeled] = useState<EvalLabel | null>(null);
 
-  const nextKey = ['eval', revision, 'next', strategy, split];
+  const isReviewer = reviewMode && user?.role.toLowerCase() === 'admin';
+  const nextKey = ['eval', revision, 'next', strategy, split, isReviewer];
   const progressKey = ['eval', revision, 'progress'];
   const next = useQuery({
     queryKey: nextKey,
-    queryFn: ({ signal }) => evalApi.next(strategy, split, { signal }),
+    queryFn: ({ signal }) => isReviewer ? evalApi.reviewNext(split, { signal }) : evalApi.next(strategy, split, { signal }),
     enabled: !!user,
     ...polling,
     refetchInterval: false,
@@ -155,9 +176,16 @@ export const EvalLab: React.FC = () => {
     enabled: !!user,
     ...polling,
   });
+  const rubric = useQuery({
+    queryKey: ['eval', revision, 'rubric'],
+    queryFn: ({ signal }) => evalApi.rubric({ signal }),
+    enabled: !!user,
+    staleTime: Infinity,
+    retry: false,
+  });
   const labelMutation = useMutation({
-    mutationFn: ({ pairId, label, types, note }: { pairId: string; label: EvalLabel; types: string[]; note: string }) =>
-      evalApi.label(pairId, label, { ...(types.length ? { mutation_types: types } : {}), ...(note ? { notes: note } : {}) }),
+    mutationFn: ({ pairId, label, annotation }: { pairId: string; label: EvalLabel; annotation: EvalAnnotation }) =>
+      evalApi.label(pairId, label, annotation),
     onSuccess: async (_data, vars) => {
       setJustLabeled(vars.label);
       await Promise.all([
@@ -175,20 +203,35 @@ export const EvalLab: React.FC = () => {
   useEffect(() => {
     setJustLabeled(null);
     setMutationTypes('');
+    setContextRelation('');
+    setChangedSpans([]);
+    setSpanSelection(null);
+    setSpanType('');
+    setSpansReviewed(false);
     setNotes('');
     setAnnotationError('');
-  }, [latestPairId, revision, strategy, split]);
+  }, [latestPairId, revision, strategy, split, isReviewer]);
 
   const pair = next.data?.pair ?? null;
   const castVote = (label: EvalLabel) => {
-    if (!pair || !user || labelMutation.isPending || next.isFetching || justLabeled) return;
-    const types = [...new Set(mutationTypes.split(',').map((value) => value.trim()).filter(Boolean))];
+    if (!pair || !user || !rubric.data || labelMutation.isPending || next.isFetching || justLabeled) return;
+    const types = [...new Set([...mutationTypes.split(',').map((value) => value.trim()).filter(Boolean), ...changedSpans.map((span) => span.mutation_type)])];
     if (types.length > 16 || types.some((type) => type.length > 64)) {
       setAnnotationError('Use at most 16 mutation types, each at most 64 characters.');
       return;
     }
+    if (types.some((type) => !rubric.data.mutation_types.includes(type))) {
+      setAnnotationError('Choose mutation types from the current annotation rubric.');
+      return;
+    }
     setAnnotationError('');
-    labelMutation.mutate({ pairId: pair.pair_id, label, types, note: notes.trim() });
+    labelMutation.mutate({ pairId: pair.pair_id, label, annotation: {
+      rubric_version: rubric.data.version,
+      ...(types.length ? { mutation_types: types } : {}),
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
+      ...(contextRelation ? { context_relation: contextRelation } : {}),
+      ...(spansReviewed || changedSpans.length ? { changed_spans: changedSpans } : {}),
+    } });
   };
 
   return (
@@ -204,9 +247,18 @@ export const EvalLab: React.FC = () => {
       </p>
       {!user ? <SignInNotice feature="Eval Lab" /> : <>
         <p className="text-xs font-mono">Authenticated annotator: {user.full_name || user.email}. Labels are bound to your account ID by the server.</p>
+        {rubric.isLoading && <p role="status" className="text-xs">Loading annotation instructions…</p>}
+        {rubric.isError && <QueryError title="Annotation rubric unavailable" error={rubric.error} onRetry={() => rubric.refetch()} retrying={rubric.isFetching} />}
+        {rubric.data && <details className="border border-hermes-bone/20 p-3 text-xs space-y-2">
+          <summary className="cursor-pointer font-mono">Annotation rubric: {rubric.data.version}</summary>
+          <dl>{Object.entries(rubric.data.labels).map(([label, definition]) => <div key={label} className="py-1"><dt className="font-bold">{label}</dt><dd>{definition}</dd></div>)}</dl>
+          <ul className="list-disc pl-4">{rubric.data.guidance.map((guidance) => <li key={guidance}>{guidance}</li>)}</ul>
+        </details>}
+        {user.role.toLowerCase() === 'admin' && <label className="flex items-center gap-2 text-xs font-mono"><input type="checkbox" checked={reviewMode} disabled={labelMutation.isPending} onChange={(event) => { setReviewMode(event.target.checked); setStrategy('coverage'); labelMutation.reset(); }} /> Independent review of disagreements</label>}
+        {isReviewer && <p className="text-xs text-amber-300">Review pairs with conflicting human labels. Other votes remain hidden; your independent vote preserves earlier dissent and does not override it.</p>}
         <div className="flex flex-wrap gap-4">
           <div><label htmlFor="eval-strategy" className="block text-xs font-mono mb-1">Sampling strategy</label>
-            <select id="eval-strategy" value={strategy} disabled={labelMutation.isPending} onChange={(event) => {
+            <select id="eval-strategy" value={strategy} disabled={labelMutation.isPending || isReviewer} onChange={(event) => {
               const value = event.target.value as EvalStrategy;
               setStrategy(value);
               if (value === 'uncertainty') setSplit('train');
@@ -235,9 +287,38 @@ export const EvalLab: React.FC = () => {
                 <textarea id="eval-notes" rows={2} maxLength={2000} value={notes} disabled={labelMutation.isPending || !!justLabeled} onChange={(event) => setNotes(event.target.value)} className="field-brutal w-full" />
               </div>
             </div>
+            {rubric.data && <div className="border border-hermes-bone/20 p-3 space-y-3 text-xs">
+              <div><label htmlFor="eval-context" className="block font-mono mb-1">Context relation (optional)</label>
+                <select id="eval-context" value={contextRelation} disabled={labelMutation.isPending || !!justLabeled} onChange={(event) => setContextRelation(event.target.value as ContextRelation | '')} className="field-brutal w-full">
+                  <option value="">Not annotated</option>{Object.entries(rubric.data.context_relations).map(([relation, definition]) => <option key={relation} value={relation}>{relation}: {definition}</option>)}
+                </select>
+              </div>
+              <p>To annotate a change, select its exact text in either claim below, choose a mutation type, then add the span. Keyboard text selection is supported.</p>
+              <p className="text-hermes-bone/60">Available mutation types: {rubric.data.mutation_types.join(', ')}</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div><label htmlFor="eval-span-type" className="block font-mono mb-1">Changed span type</label>
+                  <select id="eval-span-type" value={spanType} disabled={labelMutation.isPending || !!justLabeled} onChange={(event) => setSpanType(event.target.value)} className="field-brutal">
+                    <option value="">Choose type</option>{rubric.data.mutation_types.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                </div>
+                <button type="button" disabled={!spanSelection || !spanType || changedSpans.length >= 32 || labelMutation.isPending || !!justLabeled} onClick={() => {
+                  if (!spanSelection || !spanType) return;
+                  const span = { ...spanSelection, mutation_type: spanType };
+                  setChangedSpans((previous) => previous.some((existing) => JSON.stringify(existing) === JSON.stringify(span)) ? previous : [...previous, span]);
+                  setSpansReviewed(true);
+                  setSpanSelection(null);
+                }} className="btn-brutal">Add selected span</button>
+              </div>
+              <p role="status">{spanSelection ? `Selected claim ${spanSelection.side.toUpperCase()}: “${spanSelection.text}”` : 'No changed text selected.'}</p>
+              {!!changedSpans.length && <ul className="space-y-2">{changedSpans.map((span, index) => <li key={`${span.side}-${span.start}-${span.end}-${span.mutation_type}`} className="flex flex-wrap items-center gap-3">
+                <span>Claim {span.side.toUpperCase()} · {span.mutation_type} · “{span.text}” · {span.start}–{span.end}</span>
+                <button type="button" disabled={labelMutation.isPending || !!justLabeled} onClick={() => setChangedSpans((previous) => previous.filter((_, spanIndex) => spanIndex !== index))} className="btn-ghost-brutal" aria-label={`Remove span ${index + 1}`}>Remove</button>
+              </li>)}</ul>}
+              <label className="flex items-center gap-2"><input type="checkbox" checked={spansReviewed} disabled={changedSpans.length > 0 || labelMutation.isPending || !!justLabeled} onChange={(event) => setSpansReviewed(event.target.checked)} /> Changed spans reviewed (an empty list explicitly records no changed span)</label>
+            </div>}
             {annotationError && <p role="alert" className="text-xs text-hermes-red-bright">{annotationError}</p>}
             {labelMutation.isError && <QueryError title="Vote failed to record; the pair is preserved" error={labelMutation.error} onRetry={() => { if (labelMutation.variables) labelMutation.mutate(labelMutation.variables); }} retrying={labelMutation.isPending} />}
-            <PairView pair={pair} annotator={user.id} onLabeled={castVote} pending={labelMutation.isPending || next.isFetching || !!justLabeled} justLabeled={justLabeled} />
+            <PairView pair={pair} annotator={user.id} onLabeled={castVote} pending={!rubric.data || labelMutation.isPending || next.isFetching || !!justLabeled} justLabeled={justLabeled} onSelectSpan={setSpanSelection} />
           </>}
 
         {progress.isLoading && <p role="status" className="text-xs font-mono">Loading evaluation progress…</p>}

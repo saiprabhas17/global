@@ -1,16 +1,15 @@
-"""Evaluate mutation detection performance against annotated claim pairs.
+"""Compatibility-named cosine baseline against annotated claim-pair labels.
 
-Computes BGE-M3 (or configured SentenceTransformer) cosine similarity for each pair,
-predicts EVOLVED_FROM if similarity >= threshold, and computes Precision, Recall, and F1.
+This is a score-threshold diagnostic, not the deployed typed/temporal parent
+selector or evidence of copying. Empty or invalid gold is refused.
 """
 
 import argparse
 import datetime
 import json
+import math
 import os
-import sys
-from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pandas as pd
 
@@ -18,11 +17,13 @@ import pandas as pd
 def evaluate_mutation(
     pairs_path: str,
     threshold: float,
-    model_name: str = "BAAI/bge-m3",
-) -> Dict[str, Any]:
+    model_name: str = "sentence-transformers/all-mpnet-base-v2",
+) -> dict[str, Any]:
     """Load pairs, calculate cosine similarity, and compute classification metrics."""
     if not os.path.exists(pairs_path):
         raise FileNotFoundError(f"Pairs file not found: {pairs_path}")
+    if not math.isfinite(threshold) or not -1 <= threshold <= 1:
+        raise ValueError("Cosine threshold must be finite and between -1 and 1")
 
     df = pd.read_csv(pairs_path)
 
@@ -41,25 +42,18 @@ def evaluate_mutation(
         "DUPLICATE": 0,
     }
 
-    if n_pairs == 0:
-        return {
-            "threshold": threshold,
-            "n_pairs": 0,
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "confusion_matrix": {"tp": 0, "fp": 0, "fn": 0, "tn": 0},
-            "label_distribution": label_distribution,
-            "eval_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
+    if n_pairs == 0 or "label" not in df.columns:
+        raise ValueError("Nonempty annotated claim_a, claim_b and label fields are required; this experiment is unperformed")
 
     # Normalize labels
     df["label_norm"] = df["label"].astype(str).str.strip().str.upper()
-    for lbl in label_distribution.keys():
+    if not df["label_norm"].isin(label_distribution).all():
+        raise ValueError("Unknown or missing pair labels; use independently reviewed annotations")
+    for lbl in label_distribution:
         label_distribution[lbl] = int((df["label_norm"] == lbl).sum())
 
     # Load SentenceTransformer model
-    from sentence_transformers import SentenceTransformer, util
+    from sentence_transformers import SentenceTransformer
 
     print(f"Loading embedding model '{model_name}' for mutation evaluation...")
     model = SentenceTransformer(model_name)
@@ -98,6 +92,10 @@ def evaluate_mutation(
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
 
     return {
+        "task": "cosine_threshold_baseline_against_pair_annotation",
+        "model": model_name,
+        "publication_ready": False,
+        "limitation": "This does not evaluate typed spans, temporal parent selection, observed propagation or truth. Independently validate annotation provenance and use frozen event-disjoint splits.",
         "threshold": threshold,
         "n_pairs": n_pairs,
         "precision": round(precision, 4),
@@ -105,7 +103,7 @@ def evaluate_mutation(
         "f1": round(f1, 4),
         "confusion_matrix": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
         "label_distribution": label_distribution,
-        "eval_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "eval_timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
 
 
@@ -132,11 +130,13 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default="BAAI/bge-m3",
-        help="SentenceTransformer model name (default: BAAI/bge-m3)",
+        default="sentence-transformers/all-mpnet-base-v2",
+        help="SentenceTransformer model name (default: deployed all-mpnet-base-v2)",
     )
 
     args = parser.parse_args()
+    if os.path.exists(args.output):
+        parser.error("Output already exists; choose a new path to preserve historical results")
 
     results = evaluate_mutation(
         pairs_path=args.pairs,
@@ -148,7 +148,7 @@ def main() -> None:
     output_dir = os.path.dirname(os.path.abspath(args.output))
     os.makedirs(output_dir, exist_ok=True)
 
-    with open(args.output, "w", encoding="utf-8") as f:
+    with open(args.output, "x", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "=" * 60)

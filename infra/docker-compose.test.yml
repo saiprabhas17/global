@@ -15,7 +15,7 @@ services:
       JWT_SECRET: fixture-unit-test-secret-not-for-deployment-0001
       ENABLE_SCHEDULER: "false"
       RATE_LIMIT_ENABLED: "false"
-    command: ["pytest", "-m", "not integration", "--strict-markers"]
+    command: ["pytest", "-m", "not integration and not model", "--strict-markers"]
   frontend-tests:
     build:
       context: ../frontend

@@ -1,6 +1,7 @@
 """Compatibility publication scripts must not certify pseudo-gold or sample size."""
 
 from collections import Counter
+from typing import Any
 
 from scripts.generate_pub_report import (
     compute_inter_annotator_agreement,
@@ -10,7 +11,7 @@ from scripts.run_eval import evaluate
 from tests.test_research_support import research_records
 
 
-def legacy_rows():
+def legacy_rows() -> list[dict[str, Any]]:
     rows = []
     for record in research_records():
         for signal in ("old-signal-a", "old-signal-b"):

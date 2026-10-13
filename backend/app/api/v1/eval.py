@@ -7,16 +7,31 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
-from sqlalchemy import exists, func, select
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+from sqlalchemy import String, cast, exists, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import get_current_user, get_db_session, require_role
 from app.models.article import Article
 from app.models.claim import Claim
 from app.models.eval import EvalPair, EvalPairLabel
 from app.models.user import RoleEnum, User
+from app.services.eval.annotation import (
+    RUBRIC,
+    RUBRIC_VERSION,
+    ChangedSpan,
+    ContextRelation,
+    validate_spans,
+)
 from app.services.eval.dataset import (
     DatasetError,
     build_export,
@@ -104,11 +119,22 @@ class EvalLabelBody(BaseModel):
     annotator: str | None = Field(default=None, min_length=1, max_length=64, deprecated=True, description="Ignored; never grants another annotator's identity")
     mutation_types: list[MutationType] | None = Field(default=None, max_length=16)
     notes: str | None = Field(default=None, max_length=2000)
+    rubric_version: Literal["claim-pairs-v2"] | None = None
+    context_relation: ContextRelation | None = None
+    changed_spans: list[ChangedSpan] | None = Field(default=None, max_length=32)
 
     @field_validator("mutation_types")
     @classmethod
     def normalize_mutations(cls, value: list[str] | None) -> list[str] | None:
         return sorted(set(value)) if value is not None else None
+
+    @model_validator(mode="after")
+    def consistent_span_types(self) -> EvalLabelBody:
+        if self.mutation_types is not None and self.changed_spans and any(
+            span.mutation_type not in self.mutation_types for span in self.changed_spans
+        ):
+            raise ValueError("Each changed span type must be included in mutation_types when that list is supplied")
+        return self
 
 
 @router.post("/label", status_code=201)
@@ -118,9 +144,22 @@ async def label_pair(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """One current human vote per user; prior revisions/other origins survive."""
-    pair = (await db.execute(select(EvalPair.id).where(EvalPair.id == body.pair_id).with_for_update())).first()
+    pair = (await db.execute(select(EvalPair).where(EvalPair.id == body.pair_id).with_for_update())).scalar_one_or_none()
     if pair is None:
         raise HTTPException(status_code=404, detail="pair not found")
+    annotation: dict[str, Any] = {}
+    if body.changed_spans is not None:
+        texts = dict((await db.execute(select(Claim.id, Claim.claim_text).where(Claim.id.in_([pair.claim_a_id, pair.claim_b_id])))).all())
+        try:
+            annotation["changed_spans"] = validate_spans(body.changed_spans, texts[pair.claim_a_id], texts[pair.claim_b_id])
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    elif "changed_spans" in body.model_fields_set:
+        annotation["changed_spans"] = None
+    if "context_relation" in body.model_fields_set:
+        annotation["context_relation"] = body.context_relation
+    if annotation or body.rubric_version is not None:
+        annotation["rubric_version"] = RUBRIC_VERSION
     identity = f"user:{current_user.id}"
     vote = (await db.execute(select(EvalPairLabel).where(
         EvalPairLabel.pair_id == body.pair_id,
@@ -133,7 +172,7 @@ async def label_pair(
             pair_id=body.pair_id, annotator=identity, annotator_user_id=current_user.id,
             origin="human", label=body.label, mutation_types=body.mutation_types,
             notes=body.notes, created_at=now, updated_at=now,
-            provenance={"method": "authenticated_eval_api_v1", "identity_source": "get_current_user"},
+            provenance={"method": "authenticated_eval_api_v1", "identity_source": "get_current_user", **annotation},
         )
         db.add(vote)
     else:
@@ -141,16 +180,68 @@ async def label_pair(
             raise HTTPException(status_code=409, detail="Stored human identity is inconsistent; retain the historical row and resolve its provenance before editing")
         mutations = body.mutation_types if "mutation_types" in body.model_fields_set else vote.mutation_types
         notes = body.notes if "notes" in body.model_fields_set else vote.notes
-        if (vote.label, vote.mutation_types, vote.notes) != (body.label, mutations, notes):
+        provenance = {**(vote.provenance or {}), **annotation}
+        if (vote.label, vote.mutation_types, vote.notes, vote.provenance) != (body.label, mutations, notes, provenance):
             previous = vote_record(vote)
             previous.pop("history")
             vote.history = [*(vote.history or []), previous]
             vote.label, vote.mutation_types, vote.notes = body.label, mutations, notes
+            vote.provenance = provenance
             vote.updated_at = now
     await db.flush()
-    response = {"status": "recorded", "pair_id": str(body.pair_id), "label": vote.label, "annotator": identity, "origin": "human", "mutation_types": vote.mutation_types, "notes": vote.notes}
+    response = {"status": "recorded", "pair_id": str(body.pair_id), "label": vote.label, "annotator": identity, "origin": "human", "mutation_types": vote.mutation_types, "notes": vote.notes, **{key: (vote.provenance or {}).get(key) for key in ("rubric_version", "context_relation", "changed_spans")}}
     await db.commit()
     return response
+
+
+@router.get("/rubric")
+async def annotation_rubric(current_user: User = Depends(get_current_user)) -> dict[str, Any]:
+    return RUBRIC
+
+
+@router.get("/review/next", response_model=NextPairResponse)
+async def next_disagreement(
+    split: Split = "unassigned",
+    current_user: User = Depends(require_role(RoleEnum.admin)),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """A fresh independent review, never majority-vote adjudication or cue leakage."""
+    # Match the exact authenticated identity contract used by pair_consensus.
+    # SQLite stores UUIDs as unhyphenated hex; production PostgreSQL casts
+    # its native UUID column to canonical hyphenated text.
+    user_id: ColumnElement[Any] = cast(EvalPairLabel.annotator_user_id, String)
+    if db.get_bind().dialect.name == "sqlite":
+        user_id = (
+            func.substr(user_id, 1, 8) + literal("-") + func.substr(user_id, 9, 4)
+            + literal("-") + func.substr(user_id, 13, 4) + literal("-")
+            + func.substr(user_id, 17, 4) + literal("-") + func.substr(user_id, 21, 12)
+        )
+    human_votes = (
+        select(EvalPairLabel.pair_id)
+        .where(
+            EvalPairLabel.origin == "human", EvalPairLabel.annotator_user_id.is_not(None),
+            EvalPairLabel.annotator == literal("user:") + user_id,
+            EvalPairLabel.label.in_(VALID_LABELS),
+        )
+        .group_by(EvalPairLabel.pair_id)
+        .having(func.count(func.distinct(EvalPairLabel.label)) > 1)
+    )
+    ca, cb = aliased(Claim), aliased(Claim)
+    aa, ab = aliased(Article), aliased(Article)
+    already_labeled = exists().where(
+        EvalPairLabel.pair_id == EvalPair.id, EvalPairLabel.origin == "human",
+        EvalPairLabel.annotator_user_id == current_user.id,
+        EvalPairLabel.annotator == f"user:{current_user.id}",
+    )
+    query = (
+        select(EvalPair.id.label("id"), ca.claim_text.label("text_a"), cb.claim_text.label("text_b"), aa.domain.label("domain_a"), ab.domain.label("domain_b"))
+        .join(ca, ca.id == EvalPair.claim_a_id).join(cb, cb.id == EvalPair.claim_b_id)
+        .join(aa, aa.id == ca.article_id).join(ab, ab.id == cb.article_id)
+        .where(EvalPair.split == split, EvalPair.id.in_(human_votes), ~already_labeled)
+        .order_by(EvalPair.sampled_at, EvalPair.id).limit(1)
+    )
+    row = (await db.execute(query)).first()
+    return {"done": row is None, "pair": _blinded(row) if row is not None else None}
 
 
 @router.get("/progress")

@@ -216,3 +216,18 @@ probability calibration ([Guo et al., 2017](https://arxiv.org/abs/1706.04599)) a
 FEVER ([Thorne et al., 2018](https://arxiv.org/abs/1803.05355)) provide relevant
 retrieval/calibration/evidence tasks. A current literature review and direct
 comparisons against appropriate temporal claim-change systems remain necessary.
+
+
+## Implemented investigation and annotation support
+
+Quantity normalization converts explicitly supported units/currencies while
+preserving original character spans; text comparison reports correction/update
+cues conservatively and labels supplied source references unverified. The human
+rubric, exact span/context annotations and independent blinded disagreement
+queue are implemented. Type/span/context consensus remains separate and retains
+dissent. Frozen exports retain these annotations; implementing their UI does not
+supply human gold or complete the results ledger above.
+
+Hybrid corpus retrieval and revision-bound Wikipedia passages include exact
+text provenance and local stance/abstention. Real pretrained engineering smoke
+checks run separately from unit tests. See [Verification](VERIFICATION.md).

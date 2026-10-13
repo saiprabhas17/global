@@ -3,6 +3,10 @@ import { ExternalLink } from 'lucide-react';
 import type { TimelineCluster } from '../api/timeline';
 import { safeHttpUrl } from '../lib/urls';
 import { Dialog } from './Dialog';
+import { timelineApi } from '../api/timeline';
+import { useSession } from '../lib/session';
+import { QueryError } from './QueryError';
+import { SignInNotice } from './SignInNotice';
 
 /**
  * ClusterDossier — the inspector modal behind the timeline tunnel.
@@ -173,9 +177,9 @@ export const ClusterDossier: React.FC<{
           {cluster.members.length > 0 && (
             <div className="border border-emerald-500/20 bg-emerald-500/5 p-4 rounded-sm mt-2 mb-2">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-mono text-[10px] uppercase tracking-widest text-emerald-400/80">LLM Generative Mutation Summary</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest text-emerald-400/80">Generated wording summary</span>
               </div>
-              <MutationSummaryViewer articleIds={[cluster.id, ...cluster.members.map(m => m.id)]} />
+              <MutationSummaryViewer key={[cluster.id, ...cluster.members.map(m => m.id)].join(',')} articleIds={[cluster.id, ...cluster.members.map(m => m.id)]} />
             </div>
           )}
 
@@ -200,31 +204,41 @@ export const ClusterDossier: React.FC<{
 };
 
 const MutationSummaryViewer: React.FC<{ articleIds: string[] }> = ({ articleIds }) => {
+  const { user, revision } = useSession();
   const [summary, setSummary] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<unknown>(null);
+  const controller = React.useRef<AbortController | null>(null);
 
   React.useEffect(() => {
-    let active = true;
-    const fetchSummary = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const { timelineApi } = await import('../api/timeline');
-        const res = await timelineApi.mutationSummary(articleIds);
-        if (active) setSummary(res.summary);
-      } catch (err: unknown) {
-        if (active) setError(err instanceof Error ? err.message : 'Failed to fetch summary');
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-    fetchSummary();
-    return () => { active = false; };
-  }, [articleIds]);
+    setSummary(null);
+    setError(null);
+    setLoading(false);
+    return () => controller.current?.abort();
+  }, [revision]);
 
-  if (loading) return <p className="text-xs font-mono text-emerald-300/60 animate-pulse">Analyzing temporal claim mutations via LLM...</p>;
-  if (error) return <p className="text-xs font-mono text-hermes-red-bright">{error}</p>;
-  if (summary) return <p className="text-sm text-emerald-100/90 leading-relaxed">{summary}</p>;
-  return null;
+  const generate = async () => {
+    if (loading || !user) return;
+    const request = new AbortController();
+    controller.current = request;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await timelineApi.mutationSummary(articleIds, { signal: request.signal });
+      if (controller.current === request && !request.signal.aborted) setSummary(result.summary);
+    } catch (failure: unknown) {
+      if (controller.current === request && !request.signal.aborted) setError(failure);
+    } finally {
+      if (controller.current === request) setLoading(false);
+    }
+  };
+
+  if (!user) return <SignInNotice feature="a wording summary" />;
+  return <div className="space-y-3">
+    <p className="text-xs text-hermes-bone/60">Generate an optional summary of these article texts. It describes wording and cannot establish factual accuracy, intent or transmission.</p>
+    {!summary && <button type="button" onClick={() => void generate()} disabled={loading} className="btn-brutal">{loading ? 'Generating summary…' : 'Generate wording summary'}</button>}
+    {loading && <button type="button" onClick={() => { controller.current?.abort(); setLoading(false); }} className="btn-brutal">Cancel summary</button>}
+    {error != null && <QueryError title="Wording summary unavailable" error={error} onRetry={() => void generate()} retrying={loading} />}
+    {summary && <p className="text-sm text-emerald-100/90 leading-relaxed">{summary}</p>}
+  </div>;
 };

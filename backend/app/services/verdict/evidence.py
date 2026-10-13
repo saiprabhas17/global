@@ -17,7 +17,7 @@ from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +47,7 @@ Assessment = Literal[
 PassageSource = Literal["cleaned_content", "content", "extracted_claim"]
 
 CORPUS_WARNING = (
-    "Corpus-local coverage only: bounded retrieval over stored embedded claims, "
+    "Corpus-local coverage only: bounded keyword/vector retrieval over stored claims, "
     "not a web search or independent fact verification. Missing evidence is not falsity."
 )
 INDEPENDENCE_WARNING = (
@@ -70,9 +70,16 @@ class EvidenceItem(TypedDict):
     title: str
     domain: str | None
     published_at: datetime | None
-    similarity: float
+    similarity: float | None
     stance: Stance
     syndication_group: str
+    retrieval_method: NotRequired[Literal["vector", "keyword", "hybrid"]]
+    collected_at: NotRequired[datetime | None]
+    extracted_at: NotRequired[datetime | None]
+    passage_start: NotRequired[int | None]
+    passage_end: NotRequired[int | None]
+    passage_sha256: NotRequired[str]
+    abstention_reason: NotRequired[str | None]
 
 
 class ClaimCheckResult(TypedDict):
@@ -94,7 +101,7 @@ class EvidenceCandidate:
     title: str
     domain: str | None
     published_at: datetime | None
-    similarity: float
+    similarity: float | None
     collected_at: datetime | None = None
     extracted_at: datetime | None = None
     canonical_article_id: str | None = None
@@ -102,6 +109,9 @@ class EvidenceCandidate:
     cleaned_content: str | None = None
     content: str | None = None
     syndication_group: str = ""
+    lexical_score: float = 0.0
+    retrieval_score: float | None = None
+    retrieval_method: Literal["vector", "keyword", "hybrid"] = "vector"
 
 
 def as_utc(value: datetime) -> datetime:
@@ -161,9 +171,22 @@ async def embed_query(claim_text: str) -> list[float]:
 
 
 def _candidate(row: Mapping[str, Any]) -> EvidenceCandidate:
-    similarity = float(row["similarity"])
-    if not math.isfinite(similarity) or not -1.001 <= similarity <= 1.001:
+    similarity = float(row["similarity"]) if row.get("similarity") is not None else None
+    if similarity is not None and (
+        not math.isfinite(similarity) or not -1.001 <= similarity <= 1.001
+    ):
         raise ValueError("Invalid corpus similarity")
+    lexical_score = float(row.get("lexical_score", 0.0))
+    retrieval_score = row.get("retrieval_score")
+    if not math.isfinite(lexical_score) or lexical_score < 0:
+        raise ValueError("Invalid lexical retrieval score")
+    if retrieval_score is not None:
+        retrieval_score = float(retrieval_score)
+        if not math.isfinite(retrieval_score) or retrieval_score < 0:
+            raise ValueError("Invalid fusion retrieval score")
+    method: Literal["vector", "keyword", "hybrid"] = "vector"
+    if lexical_score > 0:
+        method = "hybrid" if similarity is not None else "keyword"
     return EvidenceCandidate(
         claim_id=str(row["claim_id"]),
         article_id=str(row["article_id"]),
@@ -174,7 +197,10 @@ def _candidate(row: Mapping[str, Any]) -> EvidenceCandidate:
         published_at=_timestamp(row.get("published_at")),
         collected_at=_timestamp(row.get("collected_at")),
         extracted_at=_timestamp(row.get("extracted_at")),
-        similarity=max(-1.0, min(1.0, similarity)),
+        similarity=max(-1.0, min(1.0, similarity)) if similarity is not None else None,
+        lexical_score=lexical_score,
+        retrieval_score=retrieval_score,
+        retrieval_method=method,
         canonical_article_id=(
             str(row["canonical_article_id"])
             if row.get("canonical_article_id")
@@ -188,20 +214,28 @@ def _candidate(row: Mapping[str, Any]) -> EvidenceCandidate:
 
 async def retrieve_candidates(
     db: AsyncSession,
-    embedding: Sequence[float] | str,
+    embedding: Sequence[float] | str | None,
     *,
     cutoff: datetime,
     historical: bool,
     limit: int,
     exclude_claim_id: str | None = None,
+    query_text: str = "",
 ) -> tuple[list[EvidenceCandidate], list[str]]:
-    """One bounded pgvector query, with temporal eligibility applied before LIMIT."""
+    """Bound each retrieval channel, then fuse ranks, preserving temporal filters.
+
+    Rank fusion is a retrieval ordering, never a probability or stance. Keyword
+    retrieval includes claims whose embeddings are absent. Both channels use the
+    same publication/collection/extraction cutoff before their LIMIT clauses.
+    """
     candidate_limit = min(MAX_CANDIDATES, max(24, limit * 8))
     exclusion = (
         "AND c.id <> CAST(:exclude_claim_id AS uuid)" if exclude_claim_id else ""
     )
+    terms = list(dict.fromkeys(re.findall(r"[^\W_]+", query_text.casefold())))[:64]
     params: dict[str, Any] = {
-        "embedding": vector_literal(embedding),
+        "embedding": vector_literal(embedding) if embedding is not None else None,
+        "lexical_query": " OR ".join(terms),
         "cutoff": as_utc(cutoff),
         "historical": historical,
         "candidate_limit": candidate_limit,
@@ -209,8 +243,42 @@ async def retrieve_candidates(
     }
     if exclude_claim_id:
         params["exclude_claim_id"] = exclude_claim_id
+    eligible = f"""
+        c.extracted_at <= :cutoff AND a.collected_at <= :cutoff
+        AND (a.published_at <= :cutoff
+             OR (:historical = false AND a.published_at IS NULL))
+        {exclusion}
+    """
     result = await db.execute(
         text(f"""
+            WITH vector_hits AS (
+                SELECT c.id, 1 - (c.embedding <=> CAST(:embedding AS vector)) AS similarity,
+                       row_number() OVER (ORDER BY c.embedding <=> CAST(:embedding AS vector), c.id) AS rank
+                FROM claims c JOIN articles a ON a.id = c.article_id
+                WHERE c.embedding IS NOT NULL AND CAST(:embedding AS vector) IS NOT NULL
+                  AND {eligible}
+                ORDER BY c.embedding <=> CAST(:embedding AS vector), c.id
+                LIMIT :candidate_limit
+            ), keyword_hits AS (
+                SELECT c.id,
+                       ts_rank_cd(to_tsvector('english', c.claim_text),
+                                  websearch_to_tsquery('english', :lexical_query)) AS lexical_score,
+                       row_number() OVER (ORDER BY
+                           ts_rank_cd(to_tsvector('english', c.claim_text),
+                                      websearch_to_tsquery('english', :lexical_query)) DESC, c.id) AS rank
+                FROM claims c JOIN articles a ON a.id = c.article_id
+                WHERE to_tsvector('english', c.claim_text)
+                          @@ websearch_to_tsquery('english', :lexical_query)
+                  AND {eligible}
+                ORDER BY lexical_score DESC, c.id
+                LIMIT :candidate_limit
+            ), fused AS (
+                SELECT COALESCE(v.id, k.id) AS id, v.similarity,
+                       COALESCE(k.lexical_score, 0) AS lexical_score,
+                       COALESCE(1.0 / (60 + v.rank), 0)
+                         + COALESCE(1.0 / (60 + k.rank), 0) AS retrieval_score
+                FROM vector_hits v FULL OUTER JOIN keyword_hits k ON k.id = v.id
+            )
             SELECT c.id::text AS claim_id, c.article_id::text AS article_id,
                    c.claim_text AS text, c.extracted_at,
                    a.url, a.title, a.domain, a.published_at, a.collected_at,
@@ -218,24 +286,19 @@ async def retrieve_candidates(
                    a.content_hash,
                    LEFT(a.cleaned_content, :content_cap) AS cleaned_content,
                    LEFT(a.content, :content_cap) AS content,
-                   1 - (c.embedding <=> CAST(:embedding AS vector)) AS similarity
-            FROM claims c JOIN articles a ON a.id = c.article_id
-            WHERE c.embedding IS NOT NULL
-              AND c.extracted_at <= :cutoff AND a.collected_at <= :cutoff
-              AND (a.published_at <= :cutoff
-                   OR (:historical = false AND a.published_at IS NULL))
-              {exclusion}
-            ORDER BY c.embedding <=> CAST(:embedding AS vector), c.id
+                   f.similarity, f.lexical_score, f.retrieval_score
+            FROM fused f JOIN claims c ON c.id = f.id
+            JOIN articles a ON a.id = c.article_id
+            ORDER BY f.retrieval_score DESC, c.id
             LIMIT :candidate_limit
         """),
         params,
     )
     candidates: list[EvidenceCandidate] = []
     warnings: list[str] = []
-    # Retain the Python bound as well, including for mocked/alternative drivers.
     for row in result.mappings().all()[:candidate_limit]:
         try:
-            candidates.append(_candidate(row))
+            candidates.append(_candidate(dict(row)))
         except (KeyError, TypeError, ValueError, OverflowError):
             logger.warning("Skipping malformed corpus evidence candidate")
             if not warnings:
@@ -308,7 +371,11 @@ def select_candidates(
     grouped = group_candidates([*candidates, *([own_origin] if own_origin else [])])
     own_group = grouped[-1].syndication_group if own_origin else None
     ranked = sorted(
-        grouped[: len(candidates)], key=lambda c: (-c.similarity, c.claim_id)
+        grouped[: len(candidates)],
+        key=lambda c: (
+            -(c.retrieval_score if c.retrieval_score is not None else (c.similarity or 0)),
+            c.claim_id,
+        ),
     )
     by_domain: OrderedDict[str | None, list[EvidenceCandidate]] = OrderedDict()
     seen_groups: set[str] = set()
@@ -398,7 +465,7 @@ def assessment_for(evidence: Sequence[EvidenceItem]) -> Assessment:
 async def check_claim_with_embedding(
     db: AsyncSession,
     claim_text: str,
-    embedding: Sequence[float] | str,
+    embedding: Sequence[float] | str | None,
     *,
     as_of: datetime | None = None,
     limit: int = 6,
@@ -432,12 +499,21 @@ async def check_claim_with_embedding(
         historical=as_of is not None,
         limit=limit,
         exclude_claim_id=exclude_claim_id,
+        query_text=claim_text,
     )
+    if embedding is None:
+        warnings.append(
+            "The embedding model is unavailable; keyword retrieval was used. "
+            "Semantic matches without shared terms may be missed."
+        )
     warnings.extend(retrieval_warnings)
     minimum = near_window()[0]
     eligible: list[EvidenceCandidate] = []
     for candidate in candidates:
-        if candidate.similarity < minimum or not candidate.text.strip():
+        if (
+            candidate.lexical_score <= 0
+            and (candidate.similarity is None or candidate.similarity < minimum)
+        ) or not candidate.text.strip():
             continue
         timestamps = [
             candidate.published_at,
@@ -473,6 +549,11 @@ async def check_claim_with_embedding(
             warnings.append(
                 "Some evidence lacks a domain; source independence cannot be assessed."
             )
+        body = (
+            candidate.cleaned_content if source == "cleaned_content"
+            else candidate.content if source == "content" else None
+        )
+        start = body.find(passage) if body is not None else -1
         evidence.append(
             {
                 "claim_id": candidate.claim_id,
@@ -484,9 +565,16 @@ async def check_claim_with_embedding(
                 "title": candidate.title,
                 "domain": candidate.domain,
                 "published_at": candidate.published_at,
-                "similarity": round(candidate.similarity, 6),
+                "similarity": round(candidate.similarity, 6) if candidate.similarity is not None else None,
                 "stance": stance.stance,
                 "syndication_group": candidate.syndication_group,
+                "retrieval_method": candidate.retrieval_method,
+                "collected_at": candidate.collected_at,
+                "extracted_at": candidate.extracted_at,
+                "passage_start": start if start >= 0 else None,
+                "passage_end": start + len(passage) if start >= 0 else None,
+                "passage_sha256": hashlib.sha256(passage.encode("utf-8")).hexdigest(),
+                "abstention_reason": stance.abstention_reason,
             }
         )
     if not evidence:
@@ -513,7 +601,12 @@ async def check_claim(
     as_of: datetime | None = None,
     limit: int = 6,
 ) -> ClaimCheckResult:
-    embedding = await embed_query(claim_text)
+    embedding: list[float] | None
+    try:
+        embedding = await embed_query(claim_text)
+    except EmbeddingUnavailableError:
+        logger.info("Embedding unavailable; using disclosed keyword corpus retrieval")
+        embedding = None
     return await check_claim_with_embedding(
         db, claim_text, embedding, as_of=as_of, limit=limit
     )

@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,11 +14,11 @@ from app.services.evolution.text_changes import analyze_text_change
 NOW = datetime(2026, 9, 20, tzinfo=UTC)
 
 
-def _id(n):
+def _id(n) -> str:
     return str(uuid.UUID(int=n))
 
 
-def _version(n, day, text):
+def _version(n, day, text) -> tuple[Any, ...]:
     return (
         _id(n),
         text,
@@ -28,11 +29,11 @@ def _version(n, day, text):
     )
 
 
-def _edge(child, parent, evidence=None, score=0.95):
+def _edge(child, parent, evidence=None, score=0.95) -> tuple[Any, ...]:
     return (_id(child), _id(parent), score, evidence, _id(5000 + child), NOW)
 
 
-def _mock_lineage_db(monkeypatch, edge_rows, version_rows):
+def _mock_lineage_db(monkeypatch, edge_rows, version_rows) -> MagicMock:
     async def execute(statement, params):
         ids = {value for key, value in params.items() if key.startswith("i")}
         result = MagicMock()

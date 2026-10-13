@@ -58,7 +58,7 @@ def build_progress(pairs: list[dict[str, Any]], votes: list[dict[str, Any]]) -> 
             grouped[str(pair[field])].append(str(pair["pair_id"]))
         return [{field: key, "pairs": len(ids), "labeled": sum(pid in human_pairs for pid in ids), "consensus": sum(pid in agreed for pid in ids)} for key, ids in sorted(grouped.items())]
 
-    origins = origin_counts(votes)
+    origins: dict[str, dict[str, Any]] = {origin: dict(counts) for origin, counts in origin_counts(votes).items()}
     for origin in ORIGINS:
         origins[origin]["labels"] = dict(sorted(Counter(str(v["label"]) for v in votes if origin_of(v) == origin).items()))
     return {

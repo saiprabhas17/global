@@ -1,4 +1,7 @@
+"""One validated embedding space for claims, article search and backfills."""
+
 import logging
+import math
 import threading
 from typing import Any
 
@@ -8,6 +11,23 @@ from sentence_transformers import SentenceTransformer
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+EMBEDDING_DIMENSION = 768
+
+
+def validate_embedding(values: Any) -> list[float]:
+    """Reject incompatible/provider error payloads before they reach pgvector."""
+    try:
+        vector = [float(value) for value in values]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Embedding must be a numeric vector") from exc
+    if len(vector) != EMBEDDING_DIMENSION:
+        raise ValueError(f"Embedding must contain {EMBEDDING_DIMENSION} dimensions")
+    if not all(math.isfinite(value) for value in vector):
+        raise ValueError("Embedding contains nonfinite values")
+    norm = math.sqrt(sum(value * value for value in vector))
+    if not math.isfinite(norm) or norm <= 0:
+        raise ValueError("Embedding must have a finite, nonzero norm")
+    return [value / norm for value in vector]
 
 
 class EmbeddingService:
@@ -15,31 +35,22 @@ class EmbeddingService:
     _lock = threading.Lock()
 
     @classmethod
-    def load_model(cls) -> None:
-        """Load the model once (idempotent, thread-safe).
-
-        Skipped when HUGGINGFACE_API_KEY is set: embeddings come from the
-        Inference API instead, saving the ~420 MB local model on small hosts.
-
-        Called by the background warm-up task and by pipeline jobs. Request
-        handlers must NOT call this: loading takes seconds and blocks.
-        """
-        if get_settings().HUGGINGFACE_API_KEY:
-            logger.info(
-                "HUGGINGFACE_API_KEY is set. Using Hugging Face Inference API "
-                "instead of local model."
-            )
+    def load_model(cls, *, force_local: bool = False) -> None:
+        """Load once, from a worker thread. Remote mode does not allocate a local model."""
+        if get_settings().HUGGINGFACE_API_KEY and not force_local:
             return
         if cls._model is not None:
             return
         with cls._lock:
             if cls._model is None:
                 model_name = get_settings().EMBEDDING_MODEL
-                logger.info("Loading SentenceTransformer model %s...", model_name)
-                # We don't strictly need PyTorch if we have ONNX, but SentenceTransformers
-                # usually defaults to PyTorch backend.
-                cls._model = SentenceTransformer(model_name)
-                logger.info("SentenceTransformer model loaded.")
+                logger.info("Loading SentenceTransformer model %s", model_name)
+                model = SentenceTransformer(model_name)
+                if model.get_sentence_embedding_dimension() != EMBEDDING_DIMENSION:
+                    raise ValueError(
+                        f"Configured model must produce {EMBEDDING_DIMENSION}-dimensional embeddings"
+                    )
+                cls._model = model
 
     @classmethod
     def is_loaded(cls) -> bool:
@@ -51,68 +62,58 @@ class EmbeddingService:
 
     @classmethod
     def generate_embedding(cls, text: str, *, allow_load: bool = False) -> list[float]:
+        if not text.strip():
+            raise ValueError("Cannot embed empty text")
         settings = get_settings()
-
-        # With a key configured, embed via the Inference API to save RAM (the
-        # local all-mpnet model is ~420 MB and OOMs small instances).
         if settings.HUGGINGFACE_API_KEY:
             try:
-                return _embed_via_hf_api(
-                    text, settings.HUGGINGFACE_API_KEY, settings.EMBEDDING_MODEL
-                )
-            except Exception as e:
-                logger.error(
-                    "Hugging Face API failed: %s. Falling back to local model.", e
-                )
-
+                return _embed_via_hf_api(text, settings.HUGGINGFACE_API_KEY, settings.EMBEDDING_MODEL)
+            except (httpx.HTTPError, ValueError):
+                # A request that explicitly forbids loading must never allocate
+                # hundreds of MB after a provider outage.
+                if cls._model is None and not allow_load:
+                    raise RuntimeError("Embedding provider unavailable; local model is not loaded") from None
+                logger.warning("Embedding provider unavailable; using the configured local model")
         if cls._model is None:
             if not allow_load:
                 raise RuntimeError("Embedding model not loaded. Call load_model() first.")
-            cls.load_model()
-        if cls._model is None:
-            # load_model() was skipped because a key is set but the API call
-            # above failed; force the local model rather than fail outright.
-            with cls._lock:
-                if cls._model is None:
-                    cls._model = SentenceTransformer(get_settings().EMBEDDING_MODEL)
+            cls.load_model(force_local=True)
         assert cls._model is not None
+        return validate_embedding(cls._model.encode(
+            text, convert_to_numpy=True, normalize_embeddings=True,
+        ))
 
-        # The model automatically truncates to its max_seq_length
-        # (384 for all-mpnet-base-v2).
-        # It returns a numpy array, we convert to list of floats for pgvector.
-        embedding_local = cls._model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
-        return [float(x) for x in embedding_local]
+    @classmethod
+    def generate_document_embedding(cls, text: str, *, allow_load: bool = False) -> list[float]:
+        """Pool overlapping windows so late-article content contributes to search.
+
+        Short windows bound the encoder context cost. Mean pooling is a document
+        representation, not a claim score or a substitute for passage retrieval.
+        """
+        words = text.split()
+        if not words:
+            raise ValueError("Cannot embed empty document")
+        vectors = []
+        for start in range(0, len(words), 160):
+            vectors.append(cls.generate_embedding(" ".join(words[start:start + 192]), allow_load=allow_load))
+            if start + 192 >= len(words):
+                break
+        return validate_embedding([sum(values) for values in zip(*vectors)])
 
 
 def _embed_via_hf_api(text: str, api_key: str, model_name: str) -> list[float]:
-    """One-text embedding via the HF feature-extraction pipeline."""
+    """Accept sentence vectors only; token matrices must not become first-token vectors."""
     if "/" not in model_name:
         model_name = f"sentence-transformers/{model_name}"
-    api_url = (
-        "https://api-inference.huggingface.co/pipeline/feature-extraction/" + model_name
-    )
-    headers = {"Authorization": f"Bearer {api_key}"}
-    with httpx.Client() as client:
+    api_url = "https://router.huggingface.co/hf-inference/models/" + model_name
+    with httpx.Client(timeout=30.0) as client:
         response = client.post(
             api_url,
-            headers=headers,
-            json={"inputs": [text], "options": {"wait_for_model": True}},
-            timeout=30.0,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"inputs": text},
         )
         response.raise_for_status()
         result = response.json()
-
-    def flatten_to_1d(data: Any) -> list[float]:
-        # Feature extraction returns nested lists; keep the first flat row.
-        if isinstance(data, list):
-            if data and isinstance(data[0], float):
-                return [float(x) for x in data]
-            if data and isinstance(data[0], list):
-                return flatten_to_1d(data[0])
-        return []
-
-    embedding = flatten_to_1d(result)
-    if not embedding:
-        raise ValueError(f"Could not parse embedding from API response: {result}")
-    return embedding
-
+    if isinstance(result, list) and len(result) == 1 and isinstance(result[0], list):
+        result = result[0]
+    return validate_embedding(result)

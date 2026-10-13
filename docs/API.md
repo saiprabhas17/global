@@ -4,7 +4,7 @@ Base URL: `http://localhost:8000/api/v1`
 
 - **Auth:** JWT bearer. `POST /auth/login` and `POST /auth/refresh` issue
   access + refresh tokens; send `Authorization: Bearer <access_token>`.
-- **Roles:** `user` and `admin`. All `*/trigger` endpoints require `admin`.
+- **Roles:** `user`, `researcher` and `admin`. All `*/trigger` endpoints require `admin`.
 - **Rate limits:** login 10/min · register 5 per 5 min · triggers ≈4/min ·
   other endpoints 120/min (sliding window; fail-open if the limiter store is
   down). 429 is returned with `Retry-After`.
@@ -30,7 +30,7 @@ Base URL: `http://localhost:8000/api/v1`
 
 | Method | Path | Auth | Body | Description |
 |--------|------|------|------|-------------|
-| POST | `/auth/register` | public | `UserCreate` | Create account `{email, password, full_name?}` → `UserResponse`. Audited. Rate-limited. |
+| POST | `/auth/register` | public | `UserCreate` | Create ordinary user `{email, password, full_name?}` → `TokenResponse`. Audited. Rate-limited. |
 | POST | `/auth/login` | public | `LoginRequest` | `{email, password}` → `TokenResponse {access_token, refresh_token, token_type}`. Audited. Rate-limited. |
 | POST | `/auth/refresh` | public | `RefreshRequest` | Exchange a valid refresh token for a new token pair. |
 | POST | `/auth/logout` | bearer | `LogoutRequest` | Revokes the supplied refresh token (added to the Redis JWT blocklist). |
@@ -112,16 +112,16 @@ Base URL: `http://localhost:8000/api/v1`
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/eval/next` | public | Next unlabeled gold pair for `?annotator=` — **blinded**: only the two claim texts and their outlets are returned, never the similarity score, bucket or verdict. |
-| POST | `/eval/label` | public | Record (or update) a label `{pair_id, annotator, label: SAME_STORY\|EVOLVED\|DISTINCT}` → 201. Labeled in-app on the **Eval Lab** tab (`#/dashboard/eval`): blinded pair, keyboard votes (1/2/3), per-bucket coverage grid, Cohen's kappa chips. |
-| GET | `/eval/progress` | public | Labeling coverage per similarity bucket, per-annotator counts and Cohen's kappa between annotators over shared pairs. |
+| GET | `/eval/next` | bearer | Next unlabeled gold pair for `?annotator=` — **blinded**: only the two claim texts and their outlets are returned, never the similarity score, bucket or verdict. |
+| POST | `/eval/label` | bearer | Record (or update) a label `{pair_id, annotator, label: SAME_STORY\|EVOLVED\|DISTINCT}` → 201. Labeled in-app on the **Eval Lab** tab (`#/dashboard/eval`): blinded pair, keyboard votes (1/2/3), per-bucket coverage grid, Cohen's kappa chips. |
+| GET | `/eval/progress` | bearer | Labeling coverage per similarity bucket, per-annotator counts and Cohen's kappa between annotators over shared pairs. |
 
 ---
 
 ## Typical flow
 
 ```
-1. POST /auth/register        # once, to create an admin
+1. POST /auth/register        # ordinary account; operator CLI grants admin
 2. POST /auth/login           # get tokens
 3. POST /collection/trigger   # ingest articles            (admin)
 4. POST /preprocessing/trigger# clean + dedupe             (admin)
@@ -143,3 +143,26 @@ Validation errors return FastAPI's standard 422 envelope:
 
 Auth failures return `401 {"detail": "..."}`, insufficient role `403`,
 rate limit `429` (+ `Retry-After`).
+
+
+## Current investigation/review/operations additions
+
+The generated [OpenAPI](openapi.json) is authoritative for exact bodies and response fields.
+
+| Method | Path | Auth | Behavior |
+|--------|------|------|----------|
+| POST | `/verdicts/check` | bearer | Bounded hybrid keyword/vector corpus retrieval, actual cited passages, stance, timestamps, offsets/hashes, canonical grouping and abstention. |
+| POST | `/verdicts/check-external` | bearer | Fixed Wikipedia revision-bound full passages with local NLI; independent of an Anthropic key. Returns a clear unavailable error for upstream failures. |
+| POST | `/graph/mutation/compare` | bearer | Quantity/unit-normalized typed spans, timestamps, conservative contextual relation, optional supplied context/reference and optional summary. References remain unverified. |
+| GET | `/eval/rubric` | bearer | Versioned labels, types, exact Unicode span and context instructions. |
+| GET | `/eval/review/next` | admin | Blinded independent disagreement review; dissent is retained. |
+| GET | `/operations/jobs` | admin | Bounded durable recent-job inspection with optional job-type filter. |
+| GET | `/operations/metrics` | admin | Stage/job counts and expired lease count. |
+| POST | `/operations/recover` | admin | `{stage: nlp or preprocessing, dry_run: true by default}`; only expired leased work is eligible. |
+| POST | `/evolution/graph/sync` | admin | Bounded transactional reconciliation of persisted articles/claims/relationships into Neo4j, independent of clustering size. |
+
+`/eval/label` also accepts `mutation_types`, `context_relation`, `changed_spans`
+and notes. Annotator identity/origin are assigned by the server. A span contains
+side `a`/`b`, start/end Unicode code-point offsets, exact text and mutation type.
+Empty spans explicitly record a completed no-span review; omission means unknown.
+This workflow does not invent independently adjudicated gold.

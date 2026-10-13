@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,6 +116,23 @@ async def test_near_duplicate_detector(db_session: AsyncSession):
     assert detector.find_and_insert(near_miss_art) is None
 
 
+async def test_duplicate_candidates_are_verified_and_retries_are_idempotent(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    detector = NearDuplicateDetector(db_session)
+    await detector.initialize()
+    first = Article(id=uuid.uuid4(), cleaned_content="Mars mission")
+    unrelated = Article(id=uuid.uuid4(), cleaned_content="Ocean warming")
+    assert detector.find_and_insert(first) is None
+    # Force an approximate-index false positive: it must not merge sources.
+    monkeypatch.setattr(detector.lsh, "query", lambda _: [str(first.id)])
+    assert detector.find_and_insert(unrelated) is None
+    assert detector.find_and_insert(first) is None
+    duplicate = Article(id=uuid.uuid4(), cleaned_content="MARS mission")
+    assert detector.find_and_insert(duplicate) == first.id
+    assert len(detector.article_map) == 3
+
+
 async def test_orchestrator_resilience(db_session: AsyncSession, monkeypatch):
     source = Source(name="Test", type=SourceTypeEnum.rss, url_or_identifier="test")
     db_session.add(source)
@@ -208,3 +226,12 @@ async def test_status_endpoint_auth(async_client):
 async def test_status_endpoint_unauth(async_client):
     response = await async_client.get("/api/v1/preprocessing/status")
     assert response.status_code == 401
+
+
+@pytest.fixture(autouse=True)
+def isolated_graph_projection(monkeypatch: pytest.MonkeyPatch):
+    """Pipeline unit tests do not contact a live Neo4j projection."""
+    from unittest.mock import AsyncMock
+
+    from app.services.evolution.neo4j_writer import Neo4jWriter
+    monkeypatch.setattr(Neo4jWriter, "sync_persisted_graph", AsyncMock(return_value={"success": True}))

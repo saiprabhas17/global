@@ -15,7 +15,7 @@ import math
 import platform
 import random
 from collections import Counter, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from itertools import combinations
 from pathlib import Path
@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 
+from app.services.eval.annotation import MUTATION_TYPES
 from app.services.eval.dataset import (
     POSITIVE_LABELS,
     SPLITS,
@@ -43,7 +44,6 @@ from app.services.eval.metrics import (
 )
 
 PROTOCOL_VERSION = "gmee-experiment-v1"
-MUTATION_TYPES = ("NUMERIC_DRIFT", "ENTITY_SUBSTITUTION", "HEDGING_SHIFT", "FRAMING_SHIFT", "WORDING_DRIFT", "NEAR_DUPLICATE")
 
 
 @dataclass(frozen=True)
@@ -303,16 +303,19 @@ def grouped_bootstrap_differences(
             metrics[name] = {"f1": _f1(values, sampled_labels, thresholds[name]), "auroc": auroc(values, sampled_labels), "auprc": average_precision(values, sampled_labels)}
         for a, b in comparison_names:
             for metric in differences[(a, b)]:
-                differences[(a, b)][metric].append(float(metrics[a][metric]) - float(metrics[b][metric]))
+                a_value, b_value = metrics[a][metric], metrics[b][metric]
+                if a_value is not None and b_value is not None:
+                    differences[(a, b)][metric].append(a_value - b_value)
     comparisons = []
-    for (a, b), metrics in differences.items():
-        entry = {"a": a, "b": b, "difference": "a-minus-b", "metrics": {}}
-        for metric, values in metrics.items():
+    for (a, b), sampled_metrics in differences.items():
+        entry: dict[str, Any] = {"a": a, "b": b, "difference": "a-minus-b", "metrics": {}}
+        for metric, sampled_values in sampled_metrics.items():
             interval = None
-            if len(values) >= 10:
-                low, high = np.quantile(values, [0.025, 0.975], method="linear")
-                interval = {"low": float(low), "high": float(high), "mean": float(np.mean(values))}
-            entry["metrics"][metric] = {"observed": float(observed[a][metric]) - float(observed[b][metric]), "ci95": interval}
+            if len(sampled_values) >= 10:
+                low, high = np.quantile(sampled_values, [0.025, 0.975], method="linear")
+                interval = {"low": float(low), "high": float(high), "mean": float(np.mean(sampled_values))}
+            a_observed, b_observed = observed[a][metric], observed[b][metric]
+            entry["metrics"][metric] = {"observed": a_observed - b_observed if a_observed is not None and b_observed is not None else None, "ci95": interval}
         comparisons.append(entry)
     return {
         "unit": "connected event/claim/article/identical-text component", "paired": True,
@@ -340,9 +343,9 @@ def mutation_evaluation(records: list[dict[str, Any]], predicted: dict[str, list
     evaluated = [v["f1"] for v in per_type.values() if v["f1"] is not None]
     errors = []
     for record in test:
-        gold, guess = set(record["gold_mutation_types"]), set(predicted[record["pair_id"]])
-        if gold != guess:
-            errors.append({"pair_id": record["pair_id"], "event_id": record["event_id"], "gold": sorted(gold), "predicted": sorted(guess), "false_positive_types": sorted(guess - gold), "false_negative_types": sorted(gold - guess)})
+        gold_set, guess = set(record["gold_mutation_types"]), set(predicted[record["pair_id"]])
+        if gold_set != guess:
+            errors.append({"pair_id": record["pair_id"], "event_id": record["event_id"], "gold": sorted(gold_set), "predicted": sorted(guess), "false_positive_types": sorted(guess - gold_set), "false_negative_types": sorted(gold_set - guess)})
     return {
         "status": "evaluated", "task": "separate multilabel mutation detection", "partition": "test",
         "analyzer": "app.services.verdict.mutation_diff.diff_versions", "orientation": "text_a -> text_b (pair order, not inferred chronology)",
@@ -374,7 +377,7 @@ def _errors(records: list[dict[str, Any]], scores: list[float], threshold: float
 def run_experiment(
     records: list[dict[str, Any]], config: ExperimentConfig | None = None,
     dataset_sha256: str | None = None,
-    mutation_analyzer: Callable[[str, str], dict[str, Any]] | None = None,
+    mutation_analyzer: Callable[[str, str], Mapping[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
     config = config or ExperimentConfig()
     config.validate()

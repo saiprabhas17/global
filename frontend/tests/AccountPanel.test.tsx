@@ -12,6 +12,15 @@ function openLogin() {
 }
 
 describe('memory-only account UI', () => {
+  it('portals dialogs outside transformed or blurred header ancestors', () => {
+    renderWithClient(<header style={{ backdropFilter: 'blur(4px)' }}><AccountPanel /></header>);
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.closest('header')).toBeNull();
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
+    fireEvent.click(screen.getByRole('button', { name: 'Close account' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
   it('logs in and verifies /me using a bearer token without persisting credentials', async () => {
     const fetch = mockApi((endpoint) => endpoint === '/auth/login'
       ? jsonResponse({ access_token: 'login-access', refresh_token: 'login-refresh', token_type: 'bearer' })

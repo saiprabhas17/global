@@ -1,1 +1,3621 @@
-{"openapi": "3.1.0", "info": {"title": "GMEE API", "version": "0.1.0"}, "paths": {"/api/v1/health": {"get": {"tags": ["health"], "summary": "Health Check", "operationId": "health_check_api_v1_health_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": {"type": "string"}, "type": "object", "title": "Response Health Check Api V1 Health Get"}}}}}}}, "/api/v1/health/ready": {"get": {"tags": ["health"], "summary": "Readiness Check", "operationId": "readiness_check_api_v1_health_ready_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {}}}}}}}, "/api/v1/dashboard": {"get": {"tags": ["dashboard"], "summary": "Dashboard Snapshot", "description": "Aggregate telemetry snapshot. Each store reports independently;\na down store degrades its own section instead of failing the request.", "operationId": "dashboard_snapshot_api_v1_dashboard_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Dashboard Snapshot Api V1 Dashboard Get"}}}}}}}, "/api/v1/auth/register": {"post": {"tags": ["auth"], "summary": "Register", "operationId": "register_api_v1_auth_register_post", "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/UserCreate"}}}, "required": true}, "responses": {"201": {"description": "Successful Response", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenResponse"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/auth/login": {"post": {"tags": ["auth"], "summary": "Login", "operationId": "login_api_v1_auth_login_post", "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/LoginRequest"}}}, "required": true}, "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenResponse"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/auth/refresh": {"post": {"tags": ["auth"], "summary": "Refresh", "operationId": "refresh_api_v1_auth_refresh_post", "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/RefreshRequest"}}}, "required": true}, "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenResponse"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/auth/logout": {"post": {"tags": ["auth"], "summary": "Logout", "operationId": "logout_api_v1_auth_logout_post", "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/LogoutRequest"}}}, "required": true}, "responses": {"204": {"description": "Successful Response"}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/auth/me": {"get": {"tags": ["auth"], "summary": "Read Users Me", "operationId": "read_users_me_api_v1_auth_me_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UserResponse"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/collection/trigger": {"post": {"tags": ["Collection"], "summary": "Trigger Collection", "description": "Manually trigger a data collection cycle (Admin only).\nNote: For production at scale, this should be offloaded to a background task \nto prevent request timeouts, but is synchronous here for MVP simplicity.", "operationId": "trigger_collection_api_v1_collection_trigger_post", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"title": "Response Trigger Collection Api V1 Collection Trigger Post"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/collection/status": {"get": {"tags": ["Collection"], "summary": "Get Collection Status", "description": "Get the status of all active sources and the latest collection run (Any authenticated user).", "operationId": "get_collection_status_api_v1_collection_status_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"title": "Response Get Collection Status Api V1 Collection Status Get"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/preprocessing/trigger": {"post": {"tags": ["Preprocessing"], "summary": "Trigger Preprocessing", "description": "Manually trigger a preprocessing cycle (admin only).", "operationId": "trigger_preprocessing_api_v1_preprocessing_trigger_post", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Trigger Preprocessing Api V1 Preprocessing Trigger Post"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/preprocessing/status": {"get": {"tags": ["Preprocessing"], "summary": "Get Preprocessing Status", "description": "Get preprocessing statistics.", "operationId": "get_preprocessing_status_api_v1_preprocessing_status_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Get Preprocessing Status Api V1 Preprocessing Status Get"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/nlp/trigger": {"post": {"tags": ["NLP"], "summary": "Trigger Nlp", "description": "Manually trigger a cycle of NLP extraction.", "operationId": "trigger_nlp_api_v1_nlp_trigger_post", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Trigger Nlp Api V1 Nlp Trigger Post"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/nlp/status": {"get": {"tags": ["NLP"], "summary": "Get Nlp Status", "description": "Get the current NLP status counts of articles.", "operationId": "get_nlp_status_api_v1_nlp_status_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Get Nlp Status Api V1 Nlp Status Get"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/evolution/trigger": {"post": {"tags": ["Evolution"], "summary": "Trigger Evolution", "operationId": "trigger_evolution_api_v1_evolution_trigger_post", "security": [{"HTTPBearer": []}], "parameters": [{"name": "force", "in": "query", "required": false, "schema": {"type": "boolean", "description": "Bypass debounce guard (minimum-corpus guard is still respected)", "default": false, "title": "Force"}, "description": "Bypass debounce guard (minimum-corpus guard is still respected)"}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"title": "Response Trigger Evolution Api V1 Evolution Trigger Post"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/evolution/status": {"get": {"tags": ["Evolution"], "summary": "Get Evolution Status", "operationId": "get_evolution_status_api_v1_evolution_status_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"title": "Response Get Evolution Status Api V1 Evolution Status Get"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/evolution/clusters": {"get": {"tags": ["Evolution"], "summary": "Get Clusters", "operationId": "get_clusters_api_v1_evolution_clusters_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"title": "Response Get Clusters Api V1 Evolution Clusters Get"}}}}}, "security": [{"HTTPBearer": []}]}}, "/api/v1/corpus/articles": {"get": {"tags": ["Corpus"], "summary": "List Articles", "description": "Paginated, searchable corpus listing.", "operationId": "list_articles_api_v1_corpus_articles_get", "parameters": [{"name": "q", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 120, "default": "", "title": "Q"}}, {"name": "domain", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 80, "default": "", "title": "Domain"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "maximum": 100, "minimum": 1, "default": 30, "title": "Limit"}}, {"name": "offset", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "default": 0, "title": "Offset"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response List Articles Api V1 Corpus Articles Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/corpus/articles/recent": {"get": {"tags": ["Corpus"], "summary": "Recent Articles", "description": "Most recently collected articles \u2014 the true ingest stream.", "operationId": "recent_articles_api_v1_corpus_articles_recent_get", "parameters": [{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "maximum": 40, "minimum": 1, "default": 12, "title": "Limit"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Recent Articles Api V1 Corpus Articles Recent Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/corpus/stats": {"get": {"tags": ["Corpus"], "summary": "Corpus Stats", "description": "Real corpus statistics for telemetry panels.", "operationId": "corpus_stats_api_v1_corpus_stats_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Corpus Stats Api V1 Corpus Stats Get"}}}}}}}, "/api/v1/corpus/search": {"get": {"tags": ["Corpus"], "summary": "Semantic Search", "description": "Nearest-neighbor article search via pgvector cosine distance.", "operationId": "semantic_search_api_v1_corpus_search_get", "parameters": [{"name": "q", "in": "query", "required": true, "schema": {"type": "string", "minLength": 2, "maxLength": 300, "title": "Q"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "maximum": 30, "minimum": 1, "default": 10, "title": "Limit"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Semantic Search Api V1 Corpus Search Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/corpus/articles/{article_id}": {"get": {"tags": ["Corpus"], "summary": "Article Detail", "operationId": "article_detail_api_v1_corpus_articles__article_id__get", "parameters": [{"name": "article_id", "in": "path", "required": true, "schema": {"type": "string", "title": "Article Id"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Article Detail Api V1 Corpus Articles  Article Id  Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/corpus/graph/story-clusters": {"get": {"tags": ["Corpus"], "summary": "Story Clusters", "description": "Hub stories (most SIMILAR links) with their cross-outlet neighbors.", "operationId": "story_clusters_api_v1_corpus_graph_story_clusters_get", "parameters": [{"name": "min_links", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "default": 3, "title": "Min Links"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "maximum": 20, "minimum": 1, "default": 6, "title": "Limit"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Story Clusters Api V1 Corpus Graph Story Clusters Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/corpus/graph/stats": {"get": {"tags": ["Corpus"], "summary": "Graph Stats", "operationId": "graph_stats_api_v1_corpus_graph_stats_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Graph Stats Api V1 Corpus Graph Stats Get"}}}}}}}, "/api/v1/verdicts": {"get": {"tags": ["Verdicts"], "summary": "List Verdicts", "operationId": "list_verdicts_api_v1_verdicts_get", "parameters": [{"name": "band", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 24, "default": "", "title": "Band"}}, {"name": "outlet", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 80, "default": "", "title": "Outlet"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "maximum": 100, "minimum": 1, "default": 20, "title": "Limit"}}, {"name": "offset", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "default": 0, "title": "Offset"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response List Verdicts Api V1 Verdicts Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/verdicts/stats": {"get": {"tags": ["Verdicts"], "summary": "Verdict Stats", "operationId": "verdict_stats_api_v1_verdicts_stats_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Verdict Stats Api V1 Verdicts Stats Get"}}}}}}}, "/api/v1/verdicts/leaderboard": {"get": {"tags": ["Verdicts"], "summary": "Outlet Leaderboard", "description": "Outlets ranked by Laplace-smoothed credibility over their verdicted claims.", "operationId": "outlet_leaderboard_api_v1_verdicts_leaderboard_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Outlet Leaderboard Api V1 Verdicts Leaderboard Get"}}}}}}}, "/api/v1/verdicts/game/mutations": {"get": {"tags": ["Verdicts"], "summary": "Mutation Chains", "description": "Claim mutation chains: same assertion, wording drifting outlet to\noutlet. Union-find over pgvector near-duplicate pairs (sim >= 0.90).", "operationId": "mutation_chains_api_v1_verdicts_game_mutations_get", "parameters": [{"name": "min_versions", "in": "query", "required": false, "schema": {"type": "integer", "default": 3, "title": "Min Versions"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "default": 8, "title": "Limit"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Mutation Chains Api V1 Verdicts Game Mutations Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/verdicts/game/claim": {"get": {"tags": ["Verdicts"], "summary": "Game Claim", "description": "Random verdicted claim for Fact-or-Fake. Answer NOT included \u2014\nclient reveals via /verdicts/{id} so peeking requires effort :)", "operationId": "game_claim_api_v1_verdicts_game_claim_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Game Claim Api V1 Verdicts Game Claim Get"}}}}}}}, "/api/v1/verdicts/feedback": {"post": {"tags": ["Verdicts"], "summary": "Submit Verdict Feedback", "description": "Human-in-the-loop verdict correction.\n\nAGREE confirms the engine's band; DISAGREE optionally supplies the band\nthe human believes is correct. These labels are the ground truth for the\nengine's agreement metrics (GET /verdicts/summary) and future calibration.\nOne vote per (claim, client) \u2014 re-voting updates the previous vote.", "operationId": "submit_verdict_feedback_api_v1_verdicts_feedback_post", "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/VerdictFeedbackBody"}}}, "required": true}, "responses": {"201": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Submit Verdict Feedback Api V1 Verdicts Feedback Post"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/verdicts/summary": {"get": {"tags": ["Verdicts"], "summary": "Verdict Summary", "description": "Engine-wide XAI summary: live distribution, full disclosed config,\nand human agreement metrics (the start of the evaluation loop).", "operationId": "verdict_summary_api_v1_verdicts_summary_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Verdict Summary Api V1 Verdicts Summary Get"}}}}}}}, "/api/v1/verdicts/{claim_id}": {"get": {"tags": ["Verdicts"], "summary": "Verdict Detail", "description": "Full transparency: the claim, its verdict, and EVERY factor.", "operationId": "verdict_detail_api_v1_verdicts__claim_id__get", "parameters": [{"name": "claim_id", "in": "path", "required": true, "schema": {"type": "string", "title": "Claim Id"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Verdict Detail Api V1 Verdicts  Claim Id  Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/graph/full": {"get": {"tags": ["Graph"], "summary": "Full Graph", "operationId": "full_graph_api_v1_graph_full_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Full Graph Api V1 Graph Full Get"}}}}}}}, "/api/v1/graph/claims": {"get": {"tags": ["Graph"], "summary": "Claims Graph", "description": "Claims network: persisted mutation edges, with a bounded pgvector fallback.\n\nEdges come from ``claim_relationships`` (EVOLVED_FROM / SIMILAR_TO rows the\nevolution pipeline already computed and indexed). Only when the selected\nclaims have no persisted links do we fall back to per-row HNSW KNN via a\nLATERAL join. The previous implementation ran a full claims\u00d7claims cross\njoin with a cosine-distance filter \u2014 ~20M distance computations per request\n(~120 s on the live corpus) while the UI polls this endpoint every 60 s.", "operationId": "claims_graph_api_v1_graph_claims_get", "parameters": [{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "default": 1200, "title": "Limit"}}, {"name": "threshold", "in": "query", "required": false, "schema": {"type": "number", "default": 0.86, "title": "Threshold"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Claims Graph Api V1 Graph Claims Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/graph/timeline": {"get": {"tags": ["Graph"], "summary": "Timeline Clusters", "description": "Story clusters ordered for the 3D timeline tunnel.\n\nEach ring = one hub story (most-linked article of its connected group),\nwith member articles from other outlets. Rings ALWAYS run newest-first\n(index 0 = nearest camera): the tunnel's wheel/click dive moves to higher\nindices, so scrolling deeper reads back through the coverage in time \u2014\nthe last ring is the original first report of the story.\n\nWhen ``article_id`` is provided, only clusters within 3 hops of that\narticle on SIMILAR edges are returned \u2014 used for the graph\u2192timeline\ndrill-down, so the tunnel shows the selected story alone.", "operationId": "timeline_clusters_api_v1_graph_timeline_get", "parameters": [{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "default": 60, "title": "Limit"}}, {"name": "article_id", "in": "query", "required": false, "schema": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Article Id"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Timeline Clusters Api V1 Graph Timeline Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/graph/scoops": {"get": {"tags": ["Graph"], "summary": "Scoop Races", "description": "Who broke each story first? For every linked cluster: outlets ranked\nby publish time with exact lag behind the winner.", "operationId": "scoop_races_api_v1_graph_scoops_get", "parameters": [{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "default": 12, "title": "Limit"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Scoop Races Api V1 Graph Scoops Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/graph/simulate": {"get": {"tags": ["Graph"], "summary": "Simulate Spread", "description": "Propagation sandbox: if each cross-outlet SIMILAR edge transmits the\nstory with probability p, how far does this story spread from `hub`?\nFirst-order branching approximation over the real article graph.", "operationId": "simulate_spread_api_v1_graph_simulate_get", "parameters": [{"name": "hub", "in": "query", "required": true, "schema": {"type": "string", "title": "Hub"}}, {"name": "p", "in": "query", "required": false, "schema": {"type": "number", "default": 0.5, "title": "P"}}, {"name": "max_depth", "in": "query", "required": false, "schema": {"type": "integer", "default": 3, "title": "Max Depth"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Simulate Spread Api V1 Graph Simulate Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/graph/lineage/{claim_id}": {"get": {"tags": ["Graph"], "summary": "Claim Lineage", "operationId": "claim_lineage_api_v1_graph_lineage__claim_id__get", "parameters": [{"name": "claim_id", "in": "path", "required": true, "schema": {"type": "string", "title": "Claim Id"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Claim Lineage Api V1 Graph Lineage  Claim Id  Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/alerts": {"get": {"tags": ["Alerts"], "summary": "List Alerts", "operationId": "list_alerts_api_v1_alerts_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response List Alerts Api V1 Alerts Get"}}}}}}}, "/api/v1/alerts/feed": {"get": {"tags": ["Alerts"], "summary": "Alert Feed", "description": "Persisted alerts (newest activity first) + unacknowledged tallies.", "operationId": "alert_feed_api_v1_alerts_feed_get", "parameters": [{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "maximum": 200, "minimum": 1, "default": 30, "title": "Limit"}}, {"name": "kind", "in": "query", "required": false, "schema": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Kind"}}, {"name": "severity", "in": "query", "required": false, "schema": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Severity"}}, {"name": "include_acknowledged", "in": "query", "required": false, "schema": {"type": "boolean", "default": false, "title": "Include Acknowledged"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Alert Feed Api V1 Alerts Feed Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/alerts/evaluate": {"post": {"tags": ["Alerts"], "summary": "Run Evaluation", "description": "Run one persistent evaluation pass (deduplicated upserts).", "operationId": "run_evaluation_api_v1_alerts_evaluate_post", "security": [{"HTTPBearer": []}], "parameters": [{"name": "window_hours", "in": "query", "required": false, "schema": {"type": "integer", "maximum": 48, "minimum": 1, "default": 6, "title": "Window Hours"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Run Evaluation Api V1 Alerts Evaluate Post"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/alerts/{alert_id}/acknowledge": {"post": {"tags": ["Alerts"], "summary": "Acknowledge Alert", "description": "Operator ack; idempotent so the first acknowledgement time wins.", "operationId": "acknowledge_alert_api_v1_alerts__alert_id__acknowledge_post", "security": [{"HTTPBearer": []}], "parameters": [{"name": "alert_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid", "title": "Alert Id"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Acknowledge Alert Api V1 Alerts  Alert Id  Acknowledge Post"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/eval/next": {"get": {"tags": ["Evaluation"], "summary": "Next Pair", "description": "Next pair this annotator hasn't labeled yet \u2014 blinded.", "operationId": "next_pair_api_v1_eval_next_get", "parameters": [{"name": "annotator", "in": "query", "required": false, "schema": {"type": "string", "default": "anon", "title": "Annotator"}}, {"name": "limit_scan", "in": "query", "required": false, "schema": {"type": "integer", "default": 50, "title": "Limit Scan"}}], "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "title": "Response Next Pair Api V1 Eval Next Get"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/eval/label": {"post": {"tags": ["Evaluation"], "summary": "Label Pair", "description": "Record (or update) this annotator's label for a pair.", "operationId": "label_pair_api_v1_eval_label_post", "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/EvalLabelBody"}}}, "required": true}, "responses": {"201": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Label Pair Api V1 Eval Label Post"}}}}, "422": {"description": "Validation Error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}}}}}}, "/api/v1/eval/progress": {"get": {"tags": ["Evaluation"], "summary": "Progress", "description": "Labeling coverage + inter-annotator agreement (Cohen's kappa).", "operationId": "progress_api_v1_eval_progress_get", "responses": {"200": {"description": "Successful Response", "content": {"application/json": {"schema": {"additionalProperties": true, "type": "object", "title": "Response Progress Api V1 Eval Progress Get"}}}}}}}}, "components": {"schemas": {"EvalLabelBody": {"properties": {"pair_id": {"type": "string", "maxLength": 36, "minLength": 32, "title": "Pair Id"}, "annotator": {"type": "string", "maxLength": 64, "minLength": 1, "title": "Annotator"}, "label": {"type": "string", "pattern": "^(SAME_STORY|EVOLVED|DISTINCT)$", "title": "Label"}}, "type": "object", "required": ["pair_id", "annotator", "label"], "title": "EvalLabelBody"}, "HTTPValidationError": {"properties": {"detail": {"items": {"$ref": "#/components/schemas/ValidationError"}, "type": "array", "title": "Detail"}}, "type": "object", "title": "HTTPValidationError"}, "LoginRequest": {"properties": {"email": {"type": "string", "format": "email", "title": "Email"}, "password": {"type": "string", "title": "Password"}}, "type": "object", "required": ["email", "password"], "title": "LoginRequest"}, "LogoutRequest": {"properties": {"refresh_token": {"type": "string", "title": "Refresh Token"}}, "type": "object", "required": ["refresh_token"], "title": "LogoutRequest"}, "RefreshRequest": {"properties": {"refresh_token": {"type": "string", "title": "Refresh Token"}}, "type": "object", "required": ["refresh_token"], "title": "RefreshRequest"}, "RoleEnum": {"type": "string", "enum": ["user", "admin", "researcher"], "title": "RoleEnum"}, "TokenResponse": {"properties": {"access_token": {"type": "string", "title": "Access Token"}, "refresh_token": {"type": "string", "title": "Refresh Token"}, "token_type": {"type": "string", "title": "Token Type", "default": "bearer"}}, "type": "object", "required": ["access_token", "refresh_token"], "title": "TokenResponse"}, "UserCreate": {"properties": {"email": {"type": "string", "format": "email", "title": "Email"}, "password": {"type": "string", "minLength": 10, "title": "Password", "description": "Password must be at least 10 characters long"}, "full_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Full Name"}}, "type": "object", "required": ["email", "password"], "title": "UserCreate"}, "UserResponse": {"properties": {"id": {"type": "string", "format": "uuid", "title": "Id"}, "email": {"type": "string", "format": "email", "title": "Email"}, "role": {"$ref": "#/components/schemas/RoleEnum"}, "full_name": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Full Name"}, "is_active": {"type": "boolean", "title": "Is Active"}, "created_at": {"type": "string", "format": "date-time", "title": "Created At"}}, "type": "object", "required": ["id", "email", "role", "full_name", "is_active", "created_at"], "title": "UserResponse"}, "ValidationError": {"properties": {"loc": {"items": {"anyOf": [{"type": "string"}, {"type": "integer"}]}, "type": "array", "title": "Location"}, "msg": {"type": "string", "title": "Message"}, "type": {"type": "string", "title": "Error Type"}, "input": {"title": "Input"}, "ctx": {"type": "object", "title": "Context"}}, "type": "object", "required": ["loc", "msg", "type"], "title": "ValidationError"}, "VerdictFeedbackBody": {"properties": {"claim_id": {"type": "string", "maxLength": 36, "minLength": 32, "title": "Claim Id"}, "vote": {"type": "string", "pattern": "^(AGREE|DISAGREE)$", "title": "Vote"}, "corrected_verdict": {"anyOf": [{"type": "string", "pattern": "^(SUPPORTED|PARTIALLY_SUPPORTED|UNRESOLVED|UNSUPPORTED|DISPUTED)$"}, {"type": "null"}], "title": "Corrected Verdict"}, "comment": {"anyOf": [{"type": "string", "maxLength": 1000}, {"type": "null"}], "title": "Comment"}}, "type": "object", "required": ["claim_id", "vote"], "title": "VerdictFeedbackBody"}}, "securitySchemes": {"HTTPBearer": {"type": "http", "scheme": "bearer"}}}}
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GMEE API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Check",
+        "operationId": "health_check_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Check Api V1 Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness Check",
+        "operationId": "readiness_check_api_v1_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dashboard": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Dashboard Snapshot",
+        "description": "Aggregate telemetry snapshot. Each store reports independently;\na down store degrades its own section instead of failing the request.",
+        "operationId": "dashboard_snapshot_api_v1_dashboard_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Dashboard Snapshot Api V1 Dashboard Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Register",
+        "operationId": "register_api_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Refresh",
+        "operationId": "refresh_api_v1_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Read Users Me",
+        "operationId": "read_users_me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/collection/trigger": {
+      "post": {
+        "tags": [
+          "Collection"
+        ],
+        "summary": "Trigger Collection",
+        "description": "Manually trigger a data collection cycle (Admin only).\n\nRecorded as a durable ``pipeline_jobs`` row; a concurrent collection job\n(scheduled or manual) yields 409 instead of a second racing run. Still\nsynchronous: behind a proxy with a short read timeout, poll\n``GET /api/v1/operations/jobs`` for the outcome.",
+        "operationId": "trigger_collection_api_v1_collection_trigger_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Trigger Collection Api V1 Collection Trigger Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/collection/status": {
+      "get": {
+        "tags": [
+          "Collection"
+        ],
+        "summary": "Get Collection Status",
+        "description": "Get the status of all active sources and the latest collection run (Any authenticated user).\nThe latest run comes from the durable job table, so it survives restarts and\nis consistent across replicas.",
+        "operationId": "get_collection_status_api_v1_collection_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Collection Status Api V1 Collection Status Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/preprocessing/trigger": {
+      "post": {
+        "tags": [
+          "Preprocessing"
+        ],
+        "summary": "Trigger Preprocessing",
+        "description": "Manually trigger a preprocessing cycle (admin only), recorded as a durable job.",
+        "operationId": "trigger_preprocessing_api_v1_preprocessing_trigger_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Trigger Preprocessing Api V1 Preprocessing Trigger Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/preprocessing/status": {
+      "get": {
+        "tags": [
+          "Preprocessing"
+        ],
+        "summary": "Get Preprocessing Status",
+        "description": "Get preprocessing statistics.",
+        "operationId": "get_preprocessing_status_api_v1_preprocessing_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Preprocessing Status Api V1 Preprocessing Status Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/nlp/trigger": {
+      "post": {
+        "tags": [
+          "NLP"
+        ],
+        "summary": "Trigger Nlp",
+        "description": "Manually trigger a cycle of NLP extraction (durable, single-flight job).",
+        "operationId": "trigger_nlp_api_v1_nlp_trigger_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Trigger Nlp Api V1 Nlp Trigger Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/nlp/status": {
+      "get": {
+        "tags": [
+          "NLP"
+        ],
+        "summary": "Get Nlp Status",
+        "description": "Get the current NLP status counts of articles.",
+        "operationId": "get_nlp_status_api_v1_nlp_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Nlp Status Api V1 Nlp Status Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/jobs": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "List Jobs",
+        "operationId": "list_jobs_api_v1_operations_jobs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "job_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/JobTypeEnum"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Jobs Api V1 Operations Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/operations/recover": {
+      "post": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Recover Articles",
+        "operationId": "recover_articles_api_v1_operations_recover_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Recover Articles Api V1 Operations Recover Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/metrics": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Pipeline Metrics",
+        "operationId": "pipeline_metrics_api_v1_operations_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Pipeline Metrics Api V1 Operations Metrics Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/evolution/graph/sync": {
+      "post": {
+        "tags": [
+          "Evolution"
+        ],
+        "summary": "Reconcile Graph",
+        "description": "Rebuild the bounded graph projection from authoritative persisted records.",
+        "operationId": "reconcile_graph_api_v1_evolution_graph_sync_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Reconcile Graph Api V1 Evolution Graph Sync Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/evolution/trigger": {
+      "post": {
+        "tags": [
+          "Evolution"
+        ],
+        "summary": "Trigger Evolution",
+        "operationId": "trigger_evolution_api_v1_evolution_trigger_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Bypass debounce guard (minimum-corpus guard is still respected)",
+              "default": false,
+              "title": "Force"
+            },
+            "description": "Bypass debounce guard (minimum-corpus guard is still respected)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Trigger Evolution Api V1 Evolution Trigger Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/status": {
+      "get": {
+        "tags": [
+          "Evolution"
+        ],
+        "summary": "Get Evolution Status",
+        "operationId": "get_evolution_status_api_v1_evolution_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Evolution Status Api V1 Evolution Status Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/evolution/clusters": {
+      "get": {
+        "tags": [
+          "Evolution"
+        ],
+        "summary": "Get Clusters",
+        "operationId": "get_clusters_api_v1_evolution_clusters_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Clusters Api V1 Evolution Clusters Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/evolution/clusters/{topic_id}/mutation-summary": {
+      "get": {
+        "tags": [
+          "Evolution"
+        ],
+        "summary": "Get Cluster Mutation Summary",
+        "description": "Generates an LLM summary of how claims in this topic cluster mutated over time.",
+        "operationId": "get_cluster_mutation_summary_api_v1_evolution_clusters__topic_id__mutation_summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "topic_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Topic Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Cluster Mutation Summary Api V1 Evolution Clusters  Topic Id  Mutation Summary Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corpus/articles": {
+      "get": {
+        "tags": [
+          "Corpus"
+        ],
+        "summary": "List Articles",
+        "description": "Paginated live corpus listing; user search treats %, _ as literal text.",
+        "operationId": "list_articles_api_v1_corpus_articles_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 120,
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 80,
+              "default": "",
+              "title": "Domain"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Articles Api V1 Corpus Articles Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corpus/articles/recent": {
+      "get": {
+        "tags": [
+          "Corpus"
+        ],
+        "summary": "Recent Articles",
+        "description": "Most recently collected processed articles from the live database.",
+        "operationId": "recent_articles_api_v1_corpus_articles_recent_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 40,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Recent Articles Api V1 Corpus Articles Recent Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corpus/stats": {
+      "get": {
+        "tags": [
+          "Corpus"
+        ],
+        "summary": "Corpus Stats",
+        "description": "Corpus statistics work immediately after migrations, including an empty DB.",
+        "operationId": "corpus_stats_api_v1_corpus_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Corpus Stats Api V1 Corpus Stats Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corpus/search": {
+      "get": {
+        "tags": [
+          "Corpus"
+        ],
+        "summary": "Semantic Search",
+        "description": "Nearest-neighbor article search; first-use loading stays off the event loop.",
+        "operationId": "semantic_search_api_v1_corpus_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 300,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 30,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Semantic Search Api V1 Corpus Search Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corpus/articles/{article_id}": {
+      "get": {
+        "tags": [
+          "Corpus"
+        ],
+        "summary": "Article Detail",
+        "operationId": "article_detail_api_v1_corpus_articles__article_id__get",
+        "parameters": [
+          {
+            "name": "article_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Article Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Article Detail Api V1 Corpus Articles  Article Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corpus/graph/story-clusters": {
+      "get": {
+        "tags": [
+          "Corpus"
+        ],
+        "summary": "Story Clusters",
+        "description": "Hub stories (most SIMILAR links) with their cross-outlet neighbors.",
+        "operationId": "story_clusters_api_v1_corpus_graph_story_clusters_get",
+        "parameters": [
+          {
+            "name": "min_links",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3,
+              "title": "Min Links"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "default": 6,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Story Clusters Api V1 Corpus Graph Story Clusters Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corpus/graph/stats": {
+      "get": {
+        "tags": [
+          "Corpus"
+        ],
+        "summary": "Graph Stats",
+        "operationId": "graph_stats_api_v1_corpus_graph_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Graph Stats Api V1 Corpus Graph Stats Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verdicts/check": {
+      "post": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Check Verdict",
+        "description": "Authenticated, read-only checking against the existing local corpus.",
+        "operationId": "check_verdict_api_v1_verdicts_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerdictCheckBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerdictCheckResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/verdicts/check-external": {
+      "post": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Check Verdict External",
+        "description": "Revision-bound Wikipedia passages; local NLI requires no hosted API key.",
+        "operationId": "check_verdict_external_api_v1_verdicts_check_external_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerdictCheckBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalCheckResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/verdicts": {
+      "get": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "List Verdicts",
+        "operationId": "list_verdicts_api_v1_verdicts_get",
+        "parameters": [
+          {
+            "name": "band",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 24,
+              "default": "",
+              "title": "Band"
+            }
+          },
+          {
+            "name": "outlet",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 80,
+              "default": "",
+              "title": "Outlet"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Verdicts Api V1 Verdicts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verdicts/stats": {
+      "get": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Verdict Stats",
+        "operationId": "verdict_stats_api_v1_verdicts_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Verdict Stats Api V1 Verdicts Stats Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verdicts/leaderboard": {
+      "get": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Outlet Leaderboard",
+        "description": "Legacy engine-label proxy ranking, not independent outlet reliability.",
+        "operationId": "outlet_leaderboard_api_v1_verdicts_leaderboard_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Outlet Leaderboard Api V1 Verdicts Leaderboard Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verdicts/game/mutations": {
+      "get": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Mutation Chains",
+        "description": "Claim mutation chains: same assertion, wording drifting outlet to\noutlet. Union-find over pgvector near-duplicate pairs (sim >= 0.90).",
+        "operationId": "mutation_chains_api_v1_verdicts_game_mutations_get",
+        "parameters": [
+          {
+            "name": "min_versions",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 3,
+              "title": "Min Versions"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 8,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Mutation Chains Api V1 Verdicts Game Mutations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verdicts/game/claim": {
+      "get": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Game Claim",
+        "description": "Random verdicted claim for Fact-or-Fake. Answer NOT included \u2014\nclient reveals via /verdicts/{id} so peeking requires effort :)",
+        "operationId": "game_claim_api_v1_verdicts_game_claim_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Game Claim Api V1 Verdicts Game Claim Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verdicts/feedback": {
+      "post": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Submit Verdict Feedback",
+        "description": "Anonymous, unverified feedback, not authoritative gold or calibration data.\n\nOne vote per (claim, canonical client IP); re-voting atomically updates it.\nUser-agent/header changes cannot create a different feedback identity.\nShared IPs may share a vote; network identity is not a verified person.",
+        "operationId": "submit_verdict_feedback_api_v1_verdicts_feedback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerdictFeedbackBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Submit Verdict Feedback Api V1 Verdicts Feedback Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verdicts/summary": {
+      "get": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Verdict Summary",
+        "description": "Disclosed config, stored-score distribution and unverified vote counts.",
+        "operationId": "verdict_summary_api_v1_verdicts_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Verdict Summary Api V1 Verdicts Summary Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verdicts/{claim_id}": {
+      "get": {
+        "tags": [
+          "Verdicts"
+        ],
+        "summary": "Verdict Detail",
+        "description": "Stored evidence and score provenance; reading never triggers rescoring.",
+        "operationId": "verdict_detail_api_v1_verdicts__claim_id__get",
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Claim Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Verdict Detail Api V1 Verdicts  Claim Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graph/timeline/mutation-summary": {
+      "post": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Get Timeline Mutation Summary",
+        "operationId": "get_timeline_mutation_summary_api_v1_graph_timeline_mutation_summary_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MutationSummaryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Timeline Mutation Summary Api V1 Graph Timeline Mutation Summary Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/graph/mutation/compare": {
+      "post": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Compare Mutations",
+        "operationId": "compare_mutations_api_v1_graph_mutation_compare_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MutationCompareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Compare Mutations Api V1 Graph Mutation Compare Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/graph/full": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Full Graph",
+        "operationId": "full_graph_api_v1_graph_full_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Full Graph Api V1 Graph Full Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graph/claims": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Claims Graph",
+        "description": "Claims network: persisted mutation edges, with a bounded pgvector fallback.\n\nEdges come from ``claim_relationships`` (EVOLVED_FROM / SIMILAR_TO rows the\nevolution pipeline already computed and indexed). Only when the selected\nclaims have no persisted links do we fall back to per-row HNSW KNN via a\nLATERAL join. The previous implementation ran a full claims\u00d7claims cross\njoin with a cosine-distance filter \u2014 ~20M distance computations per request\n(~120 s on the live corpus) while the UI polls this endpoint every 60 s.",
+        "operationId": "claims_graph_api_v1_graph_claims_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "threshold",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0.86,
+              "title": "Threshold"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Claims Graph Api V1 Graph Claims Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graph/timeline": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Timeline Clusters",
+        "description": "Story clusters ordered for the 3D timeline tunnel.\n\nEach ring = one hub story (most-linked article of its connected group),\nwith member articles from other outlets. Rings ALWAYS run newest-first\n(index 0 = nearest camera): the tunnel's wheel/click dive moves to higher\nindices, so scrolling deeper reads back through the coverage in time \u2014\nthe last ring is the original first report of the story.\n\nWhen ``article_id`` is provided, only clusters within 3 hops of that\narticle on SIMILAR edges are returned \u2014 used for the graph\u2192timeline\ndrill-down, so the tunnel shows the selected story alone.",
+        "operationId": "timeline_clusters_api_v1_graph_timeline_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 60,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "article_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Article Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Timeline Clusters Api V1 Graph Timeline Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graph/scoops": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Scoop Races",
+        "description": "Who broke each story first? For every linked cluster: outlets ranked\nby publish time with exact lag behind the winner.",
+        "operationId": "scoop_races_api_v1_graph_scoops_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Scoop Races Api V1 Graph Scoops Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graph/simulate": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Simulate Spread",
+        "description": "Hypothetical branching simulation on a bounded hub neighborhood.\n\nRead one-hop frontiers rather than the entire graph or an unbounded\nvariable-length path expansion. SIMILAR is not observed transmission.",
+        "operationId": "simulate_spread_api_v1_graph_simulate_get",
+        "parameters": [
+          {
+            "name": "hub",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Hub"
+            }
+          },
+          {
+            "name": "p",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0.5,
+              "title": "P"
+            }
+          },
+          {
+            "name": "max_depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 3,
+              "title": "Max Depth"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Simulate Spread Api V1 Graph Simulate Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/graph/lineage/{claim_id}": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Claim Lineage",
+        "operationId": "claim_lineage_api_v1_graph_lineage__claim_id__get",
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Claim Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Claim Lineage Api V1 Graph Lineage  Claim Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts": {
+      "get": {
+        "tags": [
+          "Alerts"
+        ],
+        "summary": "List Alerts",
+        "operationId": "list_alerts_api_v1_alerts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Alerts Api V1 Alerts Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/feed": {
+      "get": {
+        "tags": [
+          "Alerts"
+        ],
+        "summary": "Alert Feed",
+        "description": "Persisted alerts (newest activity first) + unacknowledged tallies.",
+        "operationId": "alert_feed_api_v1_alerts_feed_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "name": "include_acknowledged",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Acknowledged"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Alert Feed Api V1 Alerts Feed Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/evaluate": {
+      "post": {
+        "tags": [
+          "Alerts"
+        ],
+        "summary": "Run Evaluation",
+        "description": "Run one persistent evaluation pass (deduplicated upserts).",
+        "operationId": "run_evaluation_api_v1_alerts_evaluate_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "window_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 48,
+              "minimum": 1,
+              "default": 6,
+              "title": "Window Hours"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Run Evaluation Api V1 Alerts Evaluate Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/{alert_id}/acknowledge": {
+      "post": {
+        "tags": [
+          "Alerts"
+        ],
+        "summary": "Acknowledge Alert",
+        "description": "Operator ack; idempotent so the first acknowledgement time wins.",
+        "operationId": "acknowledge_alert_api_v1_alerts__alert_id__acknowledge_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Alert Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Acknowledge Alert Api V1 Alerts  Alert Id  Acknowledge Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/next": {
+      "get": {
+        "tags": [
+          "Evaluation"
+        ],
+        "summary": "Next Pair",
+        "description": "Uncertainty is score proximity for train only, not probability entropy.",
+        "operationId": "next_pair_api_v1_eval_next_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "split",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "unassigned",
+                "train",
+                "dev",
+                "test"
+              ],
+              "type": "string",
+              "default": "unassigned",
+              "title": "Split"
+            }
+          },
+          {
+            "name": "strategy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "coverage",
+                "uncertainty"
+              ],
+              "type": "string",
+              "default": "coverage",
+              "title": "Strategy"
+            }
+          },
+          {
+            "name": "annotator",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Ignored; the authenticated user is the annotator",
+              "deprecated": true,
+              "title": "Annotator"
+            },
+            "description": "Ignored; the authenticated user is the annotator",
+            "deprecated": true
+          },
+          {
+            "name": "limit_scan",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Ignored; selection is performed deterministically in SQL",
+              "deprecated": true,
+              "default": 50,
+              "title": "Limit Scan"
+            },
+            "description": "Ignored; selection is performed deterministically in SQL",
+            "deprecated": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NextPairResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/label": {
+      "post": {
+        "tags": [
+          "Evaluation"
+        ],
+        "summary": "Label Pair",
+        "description": "One current human vote per user; prior revisions/other origins survive.",
+        "operationId": "label_pair_api_v1_eval_label_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalLabelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Label Pair Api V1 Eval Label Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/eval/rubric": {
+      "get": {
+        "tags": [
+          "Evaluation"
+        ],
+        "summary": "Annotation Rubric",
+        "operationId": "annotation_rubric_api_v1_eval_rubric_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Annotation Rubric Api V1 Eval Rubric Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/eval/review/next": {
+      "get": {
+        "tags": [
+          "Evaluation"
+        ],
+        "summary": "Next Disagreement",
+        "description": "A fresh independent review, never majority-vote adjudication or cue leakage.",
+        "operationId": "next_disagreement_api_v1_eval_review_next_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "split",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "unassigned",
+                "train",
+                "dev",
+                "test"
+              ],
+              "type": "string",
+              "default": "unassigned",
+              "title": "Split"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NextPairResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/progress": {
+      "get": {
+        "tags": [
+          "Evaluation"
+        ],
+        "summary": "Progress",
+        "operationId": "progress_api_v1_eval_progress_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Progress Api V1 Eval Progress Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/eval/report": {
+      "get": {
+        "tags": [
+          "Evaluation"
+        ],
+        "summary": "Eval Report",
+        "description": "Live-corpus diagnostics only; not a frozen held-out publication result.",
+        "operationId": "eval_report_api_v1_eval_report_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Eval Report Api V1 Eval Report Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/eval/splits": {
+      "post": {
+        "tags": [
+          "Evaluation"
+        ],
+        "summary": "Assign Splits",
+        "description": "Freeze whole connected components; identical retries are idempotent.",
+        "operationId": "assign_splits_api_v1_eval_splits_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SplitAssignmentsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Assign Splits Api V1 Eval Splits Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/eval/export": {
+      "get": {
+        "tags": [
+          "Evaluation"
+        ],
+        "summary": "Export Dataset",
+        "description": "Actual records (never the blinded API); publication mode is human-only.",
+        "operationId": "export_dataset_api_v1_eval_export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Dataset Version"
+            }
+          },
+          {
+            "name": "publication",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Publication"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Export Dataset Api V1 Eval Export Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BlindedClaim": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "domain"
+        ],
+        "title": "BlindedClaim"
+      },
+      "BlindedPair": {
+        "properties": {
+          "pair_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Pair Id"
+          },
+          "a": {
+            "$ref": "#/components/schemas/BlindedClaim"
+          },
+          "b": {
+            "$ref": "#/components/schemas/BlindedClaim"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pair_id",
+          "a",
+          "b"
+        ],
+        "title": "BlindedPair"
+      },
+      "ChangedSpan": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "a",
+              "b"
+            ],
+            "title": "Side"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "End"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "mutation_type": {
+            "type": "string",
+            "title": "Mutation Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "start",
+          "end",
+          "text",
+          "mutation_type"
+        ],
+        "title": "ChangedSpan"
+      },
+      "EvalLabelBody": {
+        "properties": {
+          "pair_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Pair Id"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "SAME_STORY",
+              "EVOLVED",
+              "DISTINCT"
+            ],
+            "title": "Label"
+          },
+          "annotator": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annotator",
+            "description": "Ignored; never grants another annotator's identity",
+            "deprecated": true
+          },
+          "mutation_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "minLength": 1
+                },
+                "type": "array",
+                "maxItems": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mutation Types"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "rubric_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "claim-pairs-v2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rubric Version"
+          },
+          "context_relation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "PARAPHRASE",
+                  "UPDATE_OR_CORRECTION",
+                  "INCOMPATIBLE_ASSERTION",
+                  "INSUFFICIENT_CONTEXT",
+                  "UNRELATED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Relation"
+          },
+          "changed_spans": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChangedSpan"
+                },
+                "type": "array",
+                "maxItems": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed Spans"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pair_id",
+          "label"
+        ],
+        "title": "EvalLabelBody"
+      },
+      "ExternalCheckResponse": {
+        "properties": {
+          "claim": {
+            "type": "string",
+            "title": "Claim"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "SUPPORTED_BY_SOURCES",
+              "CONTRADICTED_BY_SOURCES",
+              "MIXED_EVIDENCE",
+              "UNVERIFIABLE"
+            ],
+            "title": "Verdict"
+          },
+          "assessment": {
+            "type": "string",
+            "enum": [
+              "SUPPORTED_BY_SOURCES",
+              "CONTRADICTED_BY_SOURCES",
+              "MIXED_EVIDENCE",
+              "UNVERIFIABLE"
+            ],
+            "title": "Assessment"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalCheckSource"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          },
+          "method_version": {
+            "type": "string",
+            "title": "Method Version"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim",
+          "verdict",
+          "assessment",
+          "explanation",
+          "sources",
+          "observed_at",
+          "method_version",
+          "warnings"
+        ],
+        "title": "ExternalCheckResponse"
+      },
+      "ExternalCheckSource": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "passage": {
+            "type": "string",
+            "title": "Passage"
+          },
+          "stance": {
+            "type": "string",
+            "enum": [
+              "entailment",
+              "contradiction",
+              "neutral"
+            ],
+            "title": "Stance"
+          },
+          "abstention_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstention Reason"
+          },
+          "revision_id": {
+            "type": "integer",
+            "title": "Revision Id"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          },
+          "retrieved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Retrieved At"
+          },
+          "passage_start": {
+            "type": "integer",
+            "title": "Passage Start"
+          },
+          "passage_end": {
+            "type": "integer",
+            "title": "Passage End"
+          },
+          "passage_sha256": {
+            "type": "string",
+            "title": "Passage Sha256"
+          },
+          "source_group": {
+            "type": "string",
+            "title": "Source Group"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "url",
+          "passage",
+          "stance",
+          "abstention_reason",
+          "revision_id",
+          "published_at",
+          "retrieved_at",
+          "passage_start",
+          "passage_end",
+          "passage_sha256",
+          "source_group"
+        ],
+        "title": "ExternalCheckSource"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "JobTypeEnum": {
+        "type": "string",
+        "enum": [
+          "collection",
+          "preprocessing",
+          "nlp",
+          "evolution"
+        ],
+        "title": "JobTypeEnum"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "LogoutRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "LogoutRequest"
+      },
+      "MutationCompareRequest": {
+        "properties": {
+          "older_text": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Older Text"
+          },
+          "newer_text": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Newer Text"
+          },
+          "older_timestamp": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Older Timestamp"
+          },
+          "newer_timestamp": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newer Timestamp"
+          },
+          "context_note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Note"
+          },
+          "provenance_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provenance Url"
+          },
+          "include_summary": {
+            "type": "boolean",
+            "title": "Include Summary",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "older_text",
+          "newer_text"
+        ],
+        "title": "MutationCompareRequest"
+      },
+      "MutationSummaryRequest": {
+        "properties": {
+          "article_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Article Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "article_ids"
+        ],
+        "title": "MutationSummaryRequest"
+      },
+      "NextPairResponse": {
+        "properties": {
+          "done": {
+            "type": "boolean",
+            "title": "Done"
+          },
+          "pair": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlindedPair"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "done",
+          "pair"
+        ],
+        "title": "NextPairResponse"
+      },
+      "RecoveryRequest": {
+        "properties": {
+          "stage": {
+            "$ref": "#/components/schemas/Stage"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage"
+        ],
+        "title": "RecoveryRequest"
+      },
+      "RefreshRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshRequest"
+      },
+      "RoleEnum": {
+        "type": "string",
+        "enum": [
+          "user",
+          "admin",
+          "researcher"
+        ],
+        "title": "RoleEnum"
+      },
+      "SplitAssignment": {
+        "properties": {
+          "pair_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Pair Id"
+          },
+          "event_group": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Event Group"
+          },
+          "split": {
+            "type": "string",
+            "enum": [
+              "train",
+              "dev",
+              "test"
+            ],
+            "title": "Split"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pair_id",
+          "event_group",
+          "split"
+        ],
+        "title": "SplitAssignment"
+      },
+      "SplitAssignmentsBody": {
+        "properties": {
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/SplitAssignment"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Assignments"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "assignments"
+        ],
+        "title": "SplitAssignmentsBody"
+      },
+      "Stage": {
+        "type": "string",
+        "enum": [
+          "preprocessing",
+          "nlp"
+        ],
+        "title": "Stage"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token"
+        ],
+        "title": "TokenResponse"
+      },
+      "UserCreate": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 10,
+            "title": "Password",
+            "description": "Password must be at least 10 characters long"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "UserCreate"
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/RoleEnum"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "role",
+          "full_name",
+          "is_active",
+          "created_at"
+        ],
+        "title": "UserResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VerdictCheckBody": {
+        "properties": {
+          "claim_text": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Claim Text"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 6
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "claim_text"
+        ],
+        "title": "VerdictCheckBody"
+      },
+      "VerdictCheckEvidence": {
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "title": "Claim Id"
+          },
+          "article_id": {
+            "type": "string",
+            "title": "Article Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "passage": {
+            "type": "string",
+            "title": "Passage"
+          },
+          "passage_source": {
+            "type": "string",
+            "enum": [
+              "cleaned_content",
+              "content",
+              "extracted_claim"
+            ],
+            "title": "Passage Source"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "similarity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Similarity"
+          },
+          "stance": {
+            "type": "string",
+            "enum": [
+              "entailment",
+              "contradiction",
+              "neutral"
+            ],
+            "title": "Stance"
+          },
+          "syndication_group": {
+            "type": "string",
+            "title": "Syndication Group"
+          },
+          "retrieval_method": {
+            "type": "string",
+            "enum": [
+              "vector",
+              "keyword",
+              "hybrid"
+            ],
+            "title": "Retrieval Method",
+            "default": "vector"
+          },
+          "collected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected At"
+          },
+          "extracted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted At"
+          },
+          "passage_start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passage Start"
+          },
+          "passage_end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passage End"
+          },
+          "passage_sha256": {
+            "type": "string",
+            "title": "Passage Sha256",
+            "default": ""
+          },
+          "abstention_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstention Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_id",
+          "article_id",
+          "text",
+          "passage",
+          "passage_source",
+          "url",
+          "title",
+          "domain",
+          "published_at",
+          "similarity",
+          "stance",
+          "syndication_group"
+        ],
+        "title": "VerdictCheckEvidence"
+      },
+      "VerdictCheckResponse": {
+        "properties": {
+          "claim_text": {
+            "type": "string",
+            "title": "Claim Text"
+          },
+          "assessment": {
+            "type": "string",
+            "enum": [
+              "SUPPORTED_BY_CORPUS",
+              "CONTRADICTED_BY_CORPUS",
+              "MIXED_EVIDENCE",
+              "INSUFFICIENT_EVIDENCE"
+            ],
+            "title": "Assessment"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictCheckEvidence"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "score_kind": {
+            "type": "string",
+            "const": "uncalibrated_heuristic",
+            "title": "Score Kind"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          },
+          "method_version": {
+            "type": "string",
+            "title": "Method Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_text",
+          "assessment",
+          "evidence",
+          "warnings",
+          "score_kind",
+          "observed_at",
+          "method_version"
+        ],
+        "title": "VerdictCheckResponse"
+      },
+      "VerdictFeedbackBody": {
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Claim Id"
+          },
+          "vote": {
+            "type": "string",
+            "enum": [
+              "AGREE",
+              "DISAGREE"
+            ],
+            "title": "Vote"
+          },
+          "corrected_verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SUPPORTED",
+                  "PARTIALLY_SUPPORTED",
+                  "UNRESOLVED",
+                  "WEAKLY_CORROBORATED",
+                  "UNSUPPORTED",
+                  "DISPUTED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrected Verdict"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_id",
+          "vote"
+        ],
+        "title": "VerdictFeedbackBody"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

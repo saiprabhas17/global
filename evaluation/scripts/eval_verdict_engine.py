@@ -1,268 +1,130 @@
-"""Evaluate Verdict Engine performance and run signal ablation studies.
+"""FEVER supplied-evidence label evaluation; never use other claims as evidence.
 
-Evaluates VerdictEngine on FEVER dev set claims using log-odds signal fusion,
-computes per-class and Macro-F1 against ground truth veracity bands,
-and performs ablation over all five verification signals.
+Requires a separate JSONL evidence file, one {id, passages:[{page,line,text}]}
+object per claim, and an explicit oracle/retrieved evidence mode. The evaluator
+measures NLI aggregation on these frozen passages, not the official FEVER score
+or GMEE's weighted corpus heuristic. An empty passage list is explicit abstention.
 """
+
+from __future__ import annotations
 
 import argparse
 import asyncio
-import datetime
+import hashlib
 import json
-import os
+import random
 import sys
-import time
+from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-# Add backend to sys.path
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
-
-from app.services.nlp.entity_extractor import EntityExtractor  # noqa: E402
-from app.services.verdict.engine import (  # noqa: E402
-    Signal,
-    VerdictEngine,
-    VerdictResult,
-    nli_stance,
-)
-
-FEVER_TO_TARGET = {
-    "SUPPORTS": "SUPPORTED",
-    "REFUTES": "DISPUTED",
-    "NOT ENOUGH INFO": "UNRESOLVED",
-}
-
-CLASSES = ["SUPPORTED", "DISPUTED", "UNRESOLVED"]
+CLASSES = ("SUPPORTS", "REFUTES", "NOT ENOUGH INFO")
 
 
-def map_band_to_target(band: str) -> str:
-    """Map VerdictResult band to target 3-class evaluation label."""
-    if band in ("SUPPORTED", "PARTIALLY_SUPPORTED", "WEAKLY_CORROBORATED"):
-        return "SUPPORTED"
-    elif band in ("DISPUTED", "PENDING_DISPUTE"):
-        return "DISPUTED"
-    else:
-        return "UNRESOLVED"
+def compute_metrics(truths: list[str], predictions: list[str]) -> dict[str, Any]:
+    if not truths or len(truths) != len(predictions) or any(v not in CLASSES for v in [*truths, *predictions]):
+        raise ValueError("Nonempty, aligned valid FEVER labels are required")
+    matrix = {label: dict.fromkeys(CLASSES, 0) for label in CLASSES}
+    for truth, prediction in zip(truths, predictions):
+        matrix[truth][prediction] += 1
+    metrics = {}
+    for label in CLASSES:
+        tp = matrix[label][label]
+        fp = sum(matrix[t][label] for t in CLASSES if t != label)
+        fn = sum(matrix[label][p] for p in CLASSES if p != label)
+        metrics[label] = {"support": sum(matrix[label].values()), "f1": 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else 0.0}
+    return {"macro_f1": sum(m["f1"] for m in metrics.values()) / len(CLASSES), "per_class": metrics, "confusion_matrix": matrix}
 
 
-def compute_metrics(
-    truths: List[str],
-    preds: List[str],
-) -> Tuple[float, Dict[str, float], Dict[str, Dict[str, int]]]:
-    """Compute per-class F1, macro F1, and 3x3 confusion matrix."""
-    matrix = {t: {p: 0 for p in CLASSES} for t in CLASSES}
-    for t, p in zip(truths, preds):
-        if t in matrix and p in matrix[t]:
-            matrix[t][p] += 1
-
-    per_class_f1: Dict[str, float] = {}
-    for c in CLASSES:
-        tp = matrix[c][c]
-        fp = sum(matrix[other][c] for other in CLASSES if other != c)
-        fn = sum(matrix[c][other] for other in CLASSES if other != c)
-
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-        per_class_f1[c] = round(f1, 4)
-
-    macro_f1 = round(sum(per_class_f1.values()) / len(CLASSES), 4)
-    return macro_f1, per_class_f1, matrix
+def read_jsonl(path: Path) -> tuple[list[dict[str, Any]], str]:
+    raw = path.read_bytes()
+    records = [json.loads(line) for line in raw.decode("utf-8-sig").splitlines() if line.strip()]
+    if not records or any(not isinstance(r, dict) for r in records):
+        raise ValueError(f"{path}: expected nonempty JSONL objects")
+    return records, hashlib.sha256(raw).hexdigest()
 
 
-async def extract_claim_signals(
-    claims: List[str],
-) -> List[List[Signal]]:
-    """Compute 5 constituent signals for each claim in batch."""
-    from sentence_transformers import SentenceTransformer, util
-
-    print("Loading embedding and NER models for verdict evaluation...")
-    EntityExtractor.load_model()
-    st_model = SentenceTransformer("all-mpnet-base-v2")
-
-    print(f"Encoding {len(claims)} claims for cross-claim stance & corroboration...")
-    embeddings = st_model.encode(claims, convert_to_tensor=True, normalize_embeddings=True)
-    sim_matrix = util.cos_sim(embeddings, embeddings).cpu()
-
-    signals_per_claim: List[List[Signal]] = []
-
-    print(f"Extracting signals for {len(claims)} claims...")
-    for idx, claim_text in enumerate(claims):
-        # 1. Linguistic signal
-        lang_sig = VerdictEngine.linguistic_signal(claim_text)
-
-        # 2. Entity grounding signal
-        try:
-            raw_ents = EntityExtractor.extract_entities(claim_text)
-            ents = [{"entity_type": e.entity_type} for e in raw_ents]
-        except Exception:
-            ents = []
-        ent_sig = VerdictEngine.entity_signal(ents)
-
-        # 3. Source track record signal (unassigned/neutral prior for isolated FEVER claims)
-        track_sig = VerdictEngine.track_record_signal(None)
-
-        # 4 & 5. Corroboration and contradiction signals
-        pool: List[Dict[str, Any]] = []
-        # Find nearest neighbor in batch if sim >= 0.70
-        best_j = None
-        best_sim = 0.0
-        for j in range(len(claims)):
-            if idx == j:
-                continue
-            s = float(sim_matrix[idx][j])
-            if s > best_sim and s >= 0.70:
-                best_sim = s
-                best_j = j
-
-        if best_j is not None:
-            stance = await nli_stance(claim_text, claims[best_j])
-            pool.append({
-                "domain": f"fever_doc_{best_j}",
-                "sim": round(best_sim, 3),
-                "nli": stance,
-            })
-
-        corr_sig, contra_sig = VerdictEngine.corroboration_signal(pool, own_domain=f"fever_doc_{idx}")
-
-        claim_signals = [corr_sig, contra_sig, track_sig, ent_sig, lang_sig]
-        signals_per_claim.append(claim_signals)
-
-        if (idx + 1) % 50 == 0 or (idx + 1) == len(claims):
-            print(f"Processed [{idx + 1:>3}/{len(claims)}] claims")
-
-    return signals_per_claim
+def prepare_examples(claims: list[dict[str, Any]], evidence: list[dict[str, Any]], sample_size: int, seed: int) -> list[dict[str, Any]]:
+    indexed = {}
+    for row in evidence:
+        key = str(row.get("id", ""))
+        if not key or key in indexed or not isinstance(row.get("passages"), list):
+            raise ValueError("Evidence must contain one unique id and passages list per claim")
+        passages = row["passages"]
+        if len(passages) > 50:
+            raise ValueError("Evidence is limited to 50 frozen passages per claim")
+        for passage in passages:
+            if not isinstance(passage, dict) or not isinstance(passage.get("text"), str) or not passage["text"].strip() or not isinstance(passage.get("page"), str) or not passage["page"].strip() or isinstance(passage.get("line"), bool) or not isinstance(passage.get("line"), int) or passage["line"] < 0:
+                raise ValueError("Each evidence passage requires a Wikipedia page, nonnegative line, and actual text")
+        indexed[key] = passages
+    output, seen = [], set()
+    for row in claims:
+        key = str(row.get("id", ""))
+        if not key or key in seen or row.get("label") not in CLASSES or not isinstance(row.get("claim"), str) or not row["claim"].strip():
+            raise ValueError("Claims require unique ids, actual text and valid FEVER labels")
+        seen.add(key)
+        if key not in indexed:
+            raise ValueError(f"Claim {key} has no frozen evidence record; retrieve Wikipedia passages or provide an explicit empty list. Other evaluation claims are never evidence.")
+        output.append({"id": key, "claim": row["claim"], "gold": row["label"], "passages": indexed[key]})
+    if not output or sample_size < 0:
+        raise ValueError("Nonempty data and a nonnegative sample-size are required")
+    if 0 < sample_size < len(output):
+        output = [output[i] for i in sorted(random.Random(seed).sample(range(len(output)), sample_size))]
+    return output
 
 
-def run_ablation(
-    truths: List[str],
-    all_signals: List[List[Signal]],
-) -> Dict[str, Any]:
-    """Evaluate full model and zero-weight ablation variants."""
-    ablation_configs = {
-        "full_model": None,
-        "without_corroboration": "corroboration",
-        "without_contradiction": "contradiction",
-        "without_track_record": "source_track_record",
-        "without_entity_grounding": "entity_grounding",
-        "without_language": "language",
-    }
+async def evaluate(examples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from app.services.verdict.engine import classify_stance
 
-    ablation_results: Dict[str, Dict[str, float]] = {}
-    full_macro = 0.0
-    full_per_class: Dict[str, float] = {}
-    full_matrix: Dict[str, Dict[str, int]] = {}
-
-    for config_name, disabled_signal in ablation_configs.items():
-        preds: List[str] = []
-        for signals in all_signals:
-            if disabled_signal is None:
-                eval_signals = signals
-            else:
-                eval_signals = [
-                    Signal(s.name, s.value, 0.0 if s.name == disabled_signal else s.weight, s.detail)
-                    for s in signals
-                ]
-
-            result: VerdictResult = VerdictEngine.combine(eval_signals)
-            pred_class = map_band_to_target(result.band)
-            preds.append(pred_class)
-
-        macro_f1, per_class, matrix = compute_metrics(truths, preds)
-        ablation_results[config_name] = {"macro_f1": macro_f1}
-
-        if config_name == "full_model":
-            full_macro = macro_f1
-            full_per_class = per_class
-            full_matrix = matrix
-
-    return {
-        "macro_f1": full_macro,
-        "per_class_f1": full_per_class,
-        "confusion_matrix": full_matrix,
-        "ablation": ablation_results,
-    }
+    predictions = []
+    for row in examples:
+        evidence = []
+        for passage in row["passages"]:
+            result = await classify_stance(row["claim"], passage["text"])
+            evidence.append({**passage, "stance": result.stance})
+        stances = {p["stance"] for p in evidence}
+        supported, refuted = "entailment" in stances, "contradiction" in stances
+        prediction = "SUPPORTS" if supported and not refuted else "REFUTES" if refuted and not supported else "NOT ENOUGH INFO"
+        predictions.append({**row, "passages": evidence, "prediction": prediction, "mixed_evidence": supported and refuted})
+    return predictions
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate Verdict Engine on FEVER benchmark with ablation.")
-    parser.add_argument(
-        "--data",
-        type=str,
-        default="evaluation/data/baselines/fever_dev.jsonl",
-        help="Path to FEVER dev JSONL dataset (default: evaluation/data/baselines/fever_dev.jsonl)",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="evaluation/results/verdict_engine.json",
-        help="Path to output JSON results file (default: evaluation/results/verdict_engine.json)",
-    )
-    parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=300,
-        help="Number of samples to evaluate (default: 300)",
-    )
-
-    args = parser.parse_args()
-
-    # Load dataset
-    claims: List[str] = []
-    truths: List[str] = []
-
-    with open(args.data, "r", encoding="utf-8") as f:
-        for idx, line in enumerate(f):
-            if not line.strip():
-                continue
-            if args.sample_size > 0 and len(claims) >= args.sample_size:
-                break
-            record = json.loads(line)
-            raw_label = record.get("label", "").strip()
-            if raw_label in FEVER_TO_TARGET:
-                claims.append(record.get("claim", "").strip())
-                truths.append(FEVER_TO_TARGET[raw_label])
-
-    actual_sample_size = len(claims)
-    print(f"Loaded {actual_sample_size} valid samples from {args.data}")
-
-    # Compute signals
-    all_signals = asyncio.run(extract_claim_signals(claims))
-
-    # Run ablation and evaluate
-    eval_data = run_ablation(truths, all_signals)
-
-    output_dict = {
-        "macro_f1": eval_data["macro_f1"],
-        "sample_size": actual_sample_size,
-        "per_class_f1": eval_data["per_class_f1"],
-        "confusion_matrix": eval_data["confusion_matrix"],
-        "ablation": eval_data["ablation"],
-        "limitation": "FEVER uses Wikipedia evidence; GMEE uses live web corpus. Results are approximate.",
-        "eval_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
-
-    # Ensure output directory exists
-    output_dir = os.path.dirname(os.path.abspath(args.output))
-    os.makedirs(output_dir, exist_ok=True)
-
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(output_dict, f, indent=2)
-
-    print("\n" + "=" * 65)
-    print("VERDICT ENGINE EVALUATION & ABLATION RESULTS")
-    print("=" * 65)
-    print(f"Sample Size:     {actual_sample_size}")
-    print(f"Macro-F1:        {eval_data['macro_f1']:.4f}")
-    print(f"Per-Class F1:    {eval_data['per_class_f1']}")
-    print(f"Confusion Matrix:{eval_data['confusion_matrix']}")
-    print("\nAblation Results:")
-    for variant, metrics in eval_data["ablation"].items():
-        print(f"  - {variant:<28}: Macro-F1 = {metrics['macro_f1']:.4f}")
-    print(f"\nSaved to:        {args.output}")
-    print("=" * 65)
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data", type=Path, required=True)
+    parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--evidence-mode", choices=["oracle", "retrieved"], required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--sample-size", type=int, default=300)
+    parser.add_argument("--seed", type=int, default=1729)
+    args = parser.parse_args(argv)
+    try:
+        if args.output.exists():
+            raise ValueError("Output exists; choose a new path to preserve historical results")
+        claims, claim_hash = read_jsonl(args.data)
+        evidence, evidence_hash = read_jsonl(args.evidence)
+        predictions = asyncio.run(evaluate(prepare_examples(claims, evidence, args.sample_size, args.seed)))
+        result = {
+            **compute_metrics([p["gold"] for p in predictions], [p["prediction"] for p in predictions]),
+            "protocol_version": "fever-supplied-evidence-v2", "task": "supplied_evidence_label_accuracy_not_official_fever_score",
+            "evidence_mode": args.evidence_mode, "dataset_sha256": claim_hash, "evidence_sha256": evidence_hash,
+            "sample_size": len(predictions), "seed": args.seed, "publication_ready": False,
+            "gold_support": dict(Counter(p["gold"] for p in predictions)), "predictions": predictions,
+            "eval_timestamp": datetime.now(UTC).isoformat(),
+            "limitation": "Oracle evidence is an upper-bound diagnostic, not retrieval performance. Retrieved evidence must be frozen without reading test labels. Mixed stance abstains. Official FEVER requires gold evidence-set matching, which this script does not compute; use the official scorer for that claim.",
+        }
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with args.output.open("x", encoding="utf-8") as file:
+            json.dump(result, file, indent=2, ensure_ascii=False, allow_nan=False)
+        print(f"Supplied-evidence ({args.evidence_mode}) n={len(predictions)}, macro-F1={result['macro_f1']:.4f}; {args.output}")
+    except (ValueError, OSError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

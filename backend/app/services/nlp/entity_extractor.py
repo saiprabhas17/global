@@ -61,6 +61,7 @@ class EntityExtractor:
         if cls._nlp is None:
             cls.load_model()
             
+        assert cls._nlp is not None
         doc = cls._nlp(text)
         # Using a set to deduplicate noun chunks (case-insensitive)
         keywords = {chunk.text.lower() for chunk in doc.noun_chunks}

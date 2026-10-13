@@ -31,7 +31,7 @@ experiments are **UNPERFORMED**; see [the audit](docs/AUDIT.md) and
 
 ### 1. Clone & configure
 
-Open the repository root (`GMEE V2`). If `.env` does not already exist, copy
+Open the repository root (`GMEE`). If `.env` does not already exist, copy
 [`infra/runtime.env.example`](infra/runtime.env.example) to root `.env` and fill
 the empty password/JWT fields locally. On POSIX, `cp -n infra/runtime.env.example
 .env` preserves an existing file. Do not commit, print or upload `.env`.
@@ -80,8 +80,11 @@ Backend:
 cd backend
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install --no-deps 'torch==2.14.1+cpu' --index-url https://download.pytorch.org/whl/cpu
+pip install -c requirements.lock -e ".[dev]"
 # Configure host-local connection URLs first; the container URLs are different.
+python -m spacy download en_core_web_sm
+python scripts/prepare_models.py  # download local embedding/extraction/stance weights
 alembic upgrade head
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
@@ -112,7 +115,8 @@ Locally (backend):
 ```bash
 cd backend
 ./.venv/Scripts/python.exe -m pytest tests/ -q     # POSIX: python -m pytest tests/ -q
-pytest --cov=app --cov-fail-under=70               # what CI enforces
+pytest --cov=app --cov-fail-under=70               # offline unit gates
+pytest -m model -o addopts=''                     # real pretrained NLP smoke
 ```
 
 Locally (frontend):
@@ -153,6 +157,25 @@ is **HTTP end-to-end smoke, not browser E2E**. Browser rendering, accessibility,
 load, restore and research experiments remain separate gates. Manual fixture
 commands and branch-protection guidance are in [Operations](docs/OPERATIONS.md).
 
+## Local administrator and pipeline controls
+
+Register a normal account in the UI. An operator with database access can assign
+its role explicitly from `backend`:
+
+```bash
+python scripts/set_user_role.py --email your-account@example.com --role admin
+```
+
+Log in again to see Pipeline operations: collection, preprocessing, NLP,
+evolution, graph reconciliation, durable run inspection and expired-work
+recovery preview. Public registration always creates an ordinary user.
+
+Graph/corpus screens query the live backend. Optional demo telemetry is labeled
+and selected explicitly; it never intercepts corpus or graph requests.
+
+See [Verification](docs/VERIFICATION.md) for completed checks and research
+requirements.
+
 ## Documentation
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — system design, data flow, service map
@@ -189,4 +212,3 @@ commands and branch-protection guidance are in [Operations](docs/OPERATIONS.md).
 ├── infra/                         # docker-compose + images
 └── docs/                          # API, audit, operations and research protocols
 ```
-.

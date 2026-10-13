@@ -58,6 +58,7 @@ describe('<LiveAuditFeed/>', () => {
 
 describe('<CacheTelemetry/>', () => {
   it('renders supplied cache metrics verbatim', () => {
+    vi.mocked(corpusApi.recent).mockResolvedValue({ items: [] });
     wrap(
       <CacheTelemetry hitRatio="98.4%" latencyMs="4.2ms" revokedTokens="1,409" memoryMb="128.4 MB" />,
     );

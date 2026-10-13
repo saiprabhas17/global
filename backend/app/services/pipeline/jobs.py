@@ -16,6 +16,7 @@ Usage::
   rollbacks never discard job state.
 """
 
+import asyncio
 import contextlib
 import logging
 import uuid
@@ -39,6 +40,10 @@ class JobAlreadyRunning(RuntimeError):
     def __init__(self, job_type: str) -> None:
         super().__init__(f"a {job_type} job is already running")
         self.job_type = job_type
+
+
+class JobLeaseLost(RuntimeError):
+    """Stop work when the durable job lease can no longer be renewed."""
 
 
 @dataclass
@@ -165,15 +170,41 @@ async def run_job(
     user_id: uuid.UUID | None = None,
 ) -> AsyncIterator[JobHandle]:
     handle = await start_job(db, job_type, trigger=trigger, user_id=user_id)
+    owner_task = asyncio.current_task()
+    lost_lease = False
+
+    async def renew_lease() -> None:
+        nonlocal lost_lease
+        interval = max(1.0, get_settings().PIPELINE_LEASE_SECONDS / 3)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                renewed = await heartbeat(db, handle)
+            except Exception:
+                logger.exception("Could not renew durable job lease %s", handle.id)
+                renewed = False
+            if not renewed:
+                lost_lease = True
+                if owner_task is not None:
+                    owner_task.cancel()
+                return
+
+    renewer = asyncio.create_task(renew_lease())
     try:
         yield handle
     except BaseException as exc:
         await finish_job(
             db, handle, status=JobStatusEnum.failed, summary=handle.summary, error=sanitize_error(exc)
         )
+        if lost_lease:
+            raise JobLeaseLost("The pipeline job lost its lease; processing stopped.") from exc
         raise
     else:
         await finish_job(db, handle, status=JobStatusEnum.succeeded, summary=handle.summary)
+    finally:
+        renewer.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await renewer
 
 
 async def latest_job(db: AsyncSession, job_type: JobTypeEnum) -> PipelineJob | None:

@@ -5,6 +5,16 @@ import { featuresApi, type MutationComparisonInput } from '../api/features';
 import { useSession } from '../lib/session';
 import { QueryError } from './QueryError';
 import { SignInNotice } from './SignInNotice';
+import { safeHttpUrl } from '../lib/urls';
+
+const RELATIONS: Record<string, string> = {
+  EQUIVALENT_QUANTITY: 'Equivalent quantities',
+  NO_LEXICAL_CHANGE: 'No wording change',
+  REPORTED_CORRECTION: 'Reported correction cue',
+  REPORTED_UPDATE: 'Reported update cue',
+  CONTEXT_REQUIRED: 'More context needed',
+  TEXTUAL_CHANGE: 'Wording changed',
+};
 
 function returnedSpanText(value: unknown, side: 'older' | 'newer'): string | undefined {
   if (!value || typeof value !== 'object') return undefined;
@@ -18,6 +28,10 @@ function returnedSpanText(value: unknown, side: 'older' | 'newer'): string | und
 function ComparisonForm() {
   const [older, setOlder] = useState('');
   const [newer, setNewer] = useState('');
+  const [olderTimestamp, setOlderTimestamp] = useState('');
+  const [newerTimestamp, setNewerTimestamp] = useState('');
+  const [contextNote, setContextNote] = useState('');
+  const [provenanceUrl, setProvenanceUrl] = useState('');
   const controller = useRef<AbortController | null>(null);
   const id = useId();
   useEffect(() => () => controller.current?.abort(), []);
@@ -29,8 +43,16 @@ function ComparisonForm() {
   });
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!comparison.isPending && older.trim() && newer.trim()) comparison.mutate({ older_text: older, newer_text: newer });
+    if (!comparison.isPending && older.trim() && newer.trim() && validContext) comparison.mutate(input());
   };
+  const validContext = !provenanceUrl.trim() || !!safeHttpUrl(provenanceUrl.trim());
+  const input = (): MutationComparisonInput => ({
+    older_text: older, newer_text: newer,
+    ...(olderTimestamp ? { older_timestamp: new Date(olderTimestamp).toISOString() } : {}),
+    ...(newerTimestamp ? { newer_timestamp: new Date(newerTimestamp).toISOString() } : {}),
+    ...(contextNote.trim() ? { context_note: contextNote.trim() } : {}),
+    ...(provenanceUrl.trim() ? { provenance_url: provenanceUrl.trim() } : {}),
+  });
   const result = comparison.data;
   const observedPropagation = result?.observed_propagation ?? result?.analysis.observed_propagation;
   const limitations = Array.isArray(result?.analysis.limitations) ? result.analysis.limitations.filter((value: unknown): value is string => typeof value === 'string') : [];
@@ -50,21 +72,43 @@ function ComparisonForm() {
             <textarea id={`${id}-newer`} required maxLength={2000} rows={5} value={newer} disabled={comparison.isPending} onChange={(event) => { setNewer(event.target.value); comparison.reset(); }} className="field-brutal w-full" />
           </div>
         </div>
+        <details className="border border-hermes-bone/20 p-3 space-y-3">
+          <summary className="text-xs font-mono cursor-pointer">Temporal context and source reference (optional)</summary>
+          <p className="text-xs text-hermes-bone/60">Supply publication times and context for a possible update or correction. A supplied link is a reference to review; it does not prove copying or establish accuracy.</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div><label htmlFor={`${id}-older-time`} className="block text-xs font-mono mb-1">Older publication time (local)</label>
+              <input id={`${id}-older-time`} type="datetime-local" value={olderTimestamp} disabled={comparison.isPending} onChange={(event) => { setOlderTimestamp(event.target.value); comparison.reset(); }} className="field-brutal w-full" /></div>
+            <div><label htmlFor={`${id}-newer-time`} className="block text-xs font-mono mb-1">Newer publication time (local)</label>
+              <input id={`${id}-newer-time`} type="datetime-local" value={newerTimestamp} disabled={comparison.isPending} onChange={(event) => { setNewerTimestamp(event.target.value); comparison.reset(); }} className="field-brutal w-full" /></div>
+          </div>
+          <div><label htmlFor={`${id}-context`} className="block text-xs font-mono mb-1">Context note</label>
+            <textarea id={`${id}-context`} value={contextNote} rows={3} maxLength={2000} disabled={comparison.isPending} onChange={(event) => { setContextNote(event.target.value); comparison.reset(); }} className="field-brutal w-full" /></div>
+          <div><label htmlFor={`${id}-provenance`} className="block text-xs font-mono mb-1">Source reference URL</label>
+            <input id={`${id}-provenance`} type="url" value={provenanceUrl} maxLength={2000} disabled={comparison.isPending} onChange={(event) => { setProvenanceUrl(event.target.value); comparison.reset(); }} className="field-brutal w-full" /></div>
+          {!validContext && <p role="alert" className="text-xs text-hermes-red-bright">Use an HTTP/HTTPS source URL.</p>}
+          {olderTimestamp && newerTimestamp && Date.parse(newerTimestamp) <= Date.parse(olderTimestamp) && <p role="note" className="text-xs text-amber-300">These times do not establish a later version. The comparison will report this ordering limitation.</p>}
+        </details>
         <div className="flex flex-wrap gap-3">
-          <button type="submit" disabled={comparison.isPending || !older.trim() || !newer.trim()} className="btn-brutal">{comparison.isPending ? 'Comparing texts…' : 'Compare mutations'}</button>
+          <button type="submit" disabled={comparison.isPending || !older.trim() || !newer.trim() || !validContext} className="btn-brutal">{comparison.isPending ? 'Comparing texts…' : 'Compare mutations'}</button>
           {comparison.isPending && <button type="button" onClick={() => controller.current?.abort()} className="btn-brutal">Cancel comparison</button>}
         </div>
       </form>
       {comparison.isIdle && <p className="text-xs font-mono text-hermes-bone/55">Enter two texts to request an analysis. No comparison has been run.</p>}
       {comparison.isPending && <p role="status" className="text-xs font-mono">Waiting for mutation analysis…</p>}
-      {comparison.isError && <QueryError title="Mutation comparison unavailable" error={comparison.error} onRetry={() => comparison.mutate({ older_text: older, newer_text: newer })} />}
+      {comparison.isError && <QueryError title="Mutation comparison unavailable" error={comparison.error} onRetry={() => { if (validContext) comparison.mutate(input()); }} />}
       {result && <div aria-live="polite" className="border border-hermes-bone/20 bg-hermes-panel-deep p-4 space-y-4">
         <h3 className="font-display text-xl">Returned mutation analysis</h3>
         <p className="text-xs font-mono text-amber-300">{observedPropagation === false ? 'No observed propagation — this compares wording only, not how a story spread.' : 'Propagation observation is not confirmed by this text comparator.'}</p>
+        {typeof result.analysis.relation_category === 'string' && <div className="border border-hermes-bone/20 p-3 space-y-2">
+          <h4 className="font-display text-lg">{RELATIONS[result.analysis.relation_category] ?? result.analysis.relation_category}</h4>
+          {typeof result.analysis.relation_explanation === 'string' && <p className="text-sm">{result.analysis.relation_explanation}</p>}
+          {result.analysis.quantity_equivalent === true && <p className="text-xs">The normalized quantities are equivalent despite different surface forms or units.</p>}
+          <p className="text-xs text-hermes-bone/60">Correction and update cues describe the supplied text; independent evidence is needed to verify the account.</p>
+        </div>}
         <div className="flex flex-wrap gap-2">
           {result.llm_summary && (
             <div className="w-full border border-emerald-500/30 bg-emerald-500/10 p-3 mb-2">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-emerald-400/80 mb-1 block">LLM Spread & Intent Analysis</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-emerald-400/80 mb-1 block">Generated wording summary</span>
               <p className="text-sm text-emerald-100">{result.llm_summary}</p>
             </div>
           )}

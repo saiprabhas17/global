@@ -14,7 +14,14 @@ const progressPayload = {
   warning: 'Complete means current consensus from authenticated humans, not publication validity.',
 };
 
+const rubricPayload = {
+  version: 'claim-pairs-v2', labels: { SAME_STORY: 'Equivalent proposition', EVOLVED: 'Changed detail', DISTINCT: 'Unrelated propositions' },
+  context_relations: { PARAPHRASE: 'Equivalent meaning', UPDATE_OR_CORRECTION: 'Explicit update or correction', INCOMPATIBLE_ASSERTION: 'Incompatible assertions', INSUFFICIENT_CONTEXT: 'More context needed', UNRELATED: 'No shared proposition' },
+  mutation_types: ['NUMERIC_DRIFT', 'HEDGING_SHIFT', 'WORDING_DRIFT'], span_offsets: 'Unicode code points', guidance: ['Judge independently.'],
+};
+
 function evalResponses(endpoint: string): Response {
+  if (endpoint === '/eval/rubric') return jsonResponse(rubricPayload);
   if (endpoint.startsWith('/eval/next')) return jsonResponse(pairPayload);
   if (endpoint === '/eval/progress') return jsonResponse(progressPayload);
   return jsonResponse({ status: 'recorded', pair_id: pairPayload.pair.pair_id, label: 'DISTINCT', origin: 'human' }, 201);
@@ -57,12 +64,12 @@ describe('Eval Lab authenticated labeling', () => {
     });
     renderWithClient(<EvalLab />);
     await screen.findByText(/Claim A text here/);
-    fireEvent.change(screen.getByLabelText(/Mutation types/), { target: { value: 'numeric, hedge, numeric' } });
+    fireEvent.change(screen.getByLabelText(/Mutation types/), { target: { value: 'NUMERIC_DRIFT, HEDGING_SHIFT, NUMERIC_DRIFT' } });
     fireEvent.change(screen.getByLabelText('Notes (optional)'), { target: { value: 'Number shifted; retain uncertainty.' } });
     fireEvent.click(screen.getByRole('button', { name: /Distinct/ }));
     expect(await screen.findByText(/No remaining pairs in the selected split/)).toBeTruthy();
     const vote = fetch.mock.calls.find(([url]) => String(url).endsWith('/eval/label'));
-    expect(JSON.parse(String(vote?.[1]?.body))).toEqual({ pair_id: pairPayload.pair.pair_id, label: 'DISTINCT', mutation_types: ['numeric', 'hedge'], notes: 'Number shifted; retain uncertainty.' });
+    expect(JSON.parse(String(vote?.[1]?.body))).toEqual({ pair_id: pairPayload.pair.pair_id, label: 'DISTINCT', mutation_types: ['NUMERIC_DRIFT', 'HEDGING_SHIFT'], notes: 'Number shifted; retain uncertainty.', rubric_version: 'claim-pairs-v2' });
     expect(new Headers(vote?.[1]?.headers).get('Authorization')).toBe('Bearer test-access');
   });
 
@@ -124,7 +131,7 @@ describe('Eval Lab authenticated labeling', () => {
 
   it('renders legitimate zero coverage without claiming every gold pair was labeled', async () => {
     signInFixture();
-    mockApi((endpoint) => endpoint.startsWith('/eval/next') ? jsonResponse({ done: true, pair: null }) : jsonResponse({ ...progressPayload, total_pairs: 0, labeled_votes: 0, labeled_pairs_distinct: 0, by_bucket: [], origins: {} }));
+    mockApi((endpoint) => endpoint === '/eval/rubric' ? jsonResponse(rubricPayload) : endpoint.startsWith('/eval/next') ? jsonResponse({ done: true, pair: null }) : jsonResponse({ ...progressPayload, total_pairs: 0, labeled_votes: 0, labeled_pairs_distinct: 0, by_bucket: [], origins: {} }));
     renderWithClient(<EvalLab />);
     expect(await screen.findByText('0 / 0 labeled')).toBeTruthy();
     expect(screen.getByText(/No evaluation pairs available/)).toBeTruthy();
@@ -151,6 +158,66 @@ describe('Eval Lab authenticated labeling', () => {
     renderWithClient(<EvalLab />);
     await screen.findByText(/Claim A text here/);
     expect(screen.queryByRole('button', { name: /Download actual export/ })).toBeNull();
+    expect(screen.queryByLabelText('Independent review of disagreements')).toBeNull();
+  });
+
+  it('anchors selected spans to Unicode codepoints and includes their type and context', async () => {
+    signInFixture();
+    const unicodePair = { ...pairPayload, pair: { ...pairPayload.pair, a: { text: '🌊 River rose 12 metres.', domain: 'a.example' } } };
+    const fetch = mockApi((endpoint) => endpoint.startsWith('/eval/next') ? jsonResponse(unicodePair) : evalResponses(endpoint));
+    renderWithClient(<EvalLab />);
+    const claim = await screen.findByLabelText('Claim A text; select a changed span') as HTMLTextAreaElement;
+    await screen.findByLabelText('Changed span type');
+    fireEvent.change(screen.getByLabelText('Changed span type'), { target: { value: 'NUMERIC_DRIFT' } });
+    claim.focus();
+    claim.setSelectionRange(14, 16);
+    fireEvent.select(claim);
+    expect(screen.getByText('Selected claim A: “12”')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Add selected span' }));
+    fireEvent.change(screen.getByLabelText('Context relation (optional)'), { target: { value: 'INSUFFICIENT_CONTEXT' } });
+    fireEvent.click(screen.getByRole('button', { name: /Evolved/ }));
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/eval/label'))).toBe(true));
+    const vote = fetch.mock.calls.find(([url]) => String(url).endsWith('/eval/label'));
+    expect(JSON.parse(String(vote?.[1]?.body))).toMatchObject({
+      rubric_version: 'claim-pairs-v2', context_relation: 'INSUFFICIENT_CONTEXT', mutation_types: ['NUMERIC_DRIFT'],
+      changed_spans: [{ side: 'a', start: 13, end: 15, text: '12', mutation_type: 'NUMERIC_DRIFT' }],
+    });
+  });
+
+  it('distinguishes an explicitly empty span annotation from an unannotated field', async () => {
+    signInFixture();
+    const fetch = mockApi(evalResponses);
+    renderWithClient(<EvalLab />);
+    await screen.findByLabelText(/Changed spans reviewed/);
+    fireEvent.click(screen.getByLabelText(/Changed spans reviewed/));
+    fireEvent.click(screen.getByRole('button', { name: /^Same story/ }));
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/eval/label'))).toBe(true));
+    const vote = fetch.mock.calls.find(([url]) => String(url).endsWith('/eval/label'));
+    expect(JSON.parse(String(vote?.[1]?.body))).toMatchObject({ changed_spans: [] });
+  });
+
+  it('loads the separate blinded disagreement queue for an administrator', async () => {
+    signInFixture({ role: 'admin' });
+    const fetch = mockApi((endpoint) => endpoint.startsWith('/eval/review/next') ? jsonResponse(pairPayload) : evalResponses(endpoint));
+    renderWithClient(<EvalLab />);
+    await screen.findByText(/Claim A text here/);
+    fireEvent.click(screen.getByLabelText('Independent review of disagreements'));
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/eval/review/next?split=unassigned'))).toBe(true));
+    expect(screen.getByLabelText('Sampling strategy').hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/preserves earlier dissent/)).toBeTruthy();
+  });
+
+  it('requires the current rubric before accepting a vote and offers retry', async () => {
+    signInFixture();
+    let unavailable = true;
+    mockApi((endpoint) => endpoint === '/eval/rubric' && unavailable ? jsonResponse({ detail: 'Rubric unavailable' }, 503) : evalResponses(endpoint));
+    renderWithClient(<EvalLab />);
+    await screen.findByText('Annotation rubric unavailable');
+    expect(screen.getByRole('button', { name: /^Same story/ }).hasAttribute('disabled')).toBe(true);
+    unavailable = false;
+    fireEvent.click(screen.getByRole('button', { name: /Retry annotation rubric/ }));
+    await screen.findByText('Annotation rubric: claim-pairs-v2');
+    expect(screen.getByRole('button', { name: /^Same story/ }).hasAttribute('disabled')).toBe(false);
   });
 
   it('downloads the actual admin export response bytes with the required dataset_version', async () => {
@@ -171,8 +238,8 @@ describe('Eval Lab authenticated labeling', () => {
     fireEvent.click(screen.getByRole('button', { name: /Download actual export/ }));
     await screen.findByText('Export response downloaded.');
     const blob = createUrl.mock.calls[0][0] as Blob;
-    // jsdom's Blob lacks .text(); FileReader is the portable reader here.
-    const text = await new Promise<string>((resolve, reject) => {
+    // Native fetch returns a Node Blob; jsdom FileReader only accepts its own Blob.
+    const text = typeof blob.text === 'function' ? await blob.text() : await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
       reader.onerror = () => reject(reader.error);

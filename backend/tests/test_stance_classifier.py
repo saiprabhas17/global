@@ -2,6 +2,7 @@
 
 import sys
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -20,7 +21,7 @@ def reset_stance_state(monkeypatch):
     engine.STANCE_CACHE.clear()
 
 
-def mock_classifier(monkeypatch, logits, labels=None, token_count=4):
+def mock_classifier(monkeypatch, logits, labels=None, token_count=4) -> Any:
     labels = labels or {0: "contradiction", 1: "entailment", 2: "neutral"}
     tokenizer = Mock(
         return_value={"input_ids": torch.ones((1, token_count), dtype=torch.long)}
@@ -210,7 +211,7 @@ def test_lazy_loader_uses_three_class_local_weights_and_optional_revision(monkey
         ),
     )
     assert tokenizer_loader.call_count == 0
-    config = {
+    config: engine.NLIConfiguration = {
         "model": "local-nli",
         "revision": "pinned-revision",
         "confidence_min": 0.7,

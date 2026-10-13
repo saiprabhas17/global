@@ -11,6 +11,30 @@ function deferred<T>() {
 }
 
 describe('typed API requests and readiness', () => {
+  it.each(['/graph/full', '/graph/claims', '/graph/timeline?article_id=actual-id', '/corpus/stats', '/corpus/articles?q=river'])('requests live %s data without a fixture fallback', async (endpoint) => {
+    const data = { source: 'actual-api', endpoint };
+    const fetch = mockApi(() => jsonResponse(data));
+    expect(await apiClient.get(endpoint)).toEqual(data);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(`/api/v1${endpoint}`);
+  });
+
+  it('does not replace a graph failure with fabricated nodes', async () => {
+    const fetch = mockApi(() => jsonResponse({ detail: 'Graph projection unavailable' }, 503));
+    await expect(apiClient.get('/graph/full')).rejects.toMatchObject({ status: 503, message: 'Graph projection unavailable' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies authentication and cancellation before mutation requests', async () => {
+    const fetch = mockApi(() => jsonResponse({}));
+    await expect(apiClient.post('/graph/mutation/compare', {}, { authenticated: true })).rejects.toMatchObject({ status: 401 });
+    signInFixture();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(apiClient.post('/graph/mutation/compare', {}, { authenticated: true, signal: controller.signal })).rejects.toMatchObject({ kind: 'aborted' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('uses the real ready aggregate value', async () => {
     mockApi(() => jsonResponse(readyFixture));
     expect(await fetchHealth()).toEqual(readyFixture);

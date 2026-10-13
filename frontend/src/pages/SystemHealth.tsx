@@ -16,6 +16,7 @@ import { CacheTelemetry } from '../components/CacheTelemetry';
 import CorpusExplorer from '../components/CorpusExplorer';
 import { FactCheck } from '../components/FactCheck';
 import { EvalLab } from '../components/EvalLab';
+import { OperationsPanel } from '../components/OperationsPanel';
 import FullCorpusGraph from '../components/FullCorpusGraph';
 import TimelineTunnel from '../components/TimelineTunnel';
 import MasalaLab from '../components/MasalaLab';
@@ -219,6 +220,7 @@ const SystemHealthContent: React.FC = () => {
         {dashboard.isError && <div className="mb-6"><QueryError title="Dashboard metrics unavailable" error={dashboard.error} onRetry={() => dashboard.refetch()} retrying={dashboard.isFetching} />
           {dash && <p className="font-mono text-xs mt-2">Showing the last real snapshot from {dash.generated_at}; values may be stale.</p>}
         </div>}
+        <OperationsPanel />
 
         {activeTab === 'overview' && isLoading && dashboard.isLoading && !demoMode ? <LoadingGrid /> : (
           /* Active Content Views Based on Tab */

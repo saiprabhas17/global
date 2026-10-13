@@ -1,106 +1,52 @@
-# mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, disallow-any-generics=False
+"""Backfill article vectors using the deployed model and the migrated schema.
 
-"""Semantic search over the article corpus using pgvector.
-
-Embeds the query with the project's own model (all-mpnet-base-v2), then
-runs pgvector cosine distance against article embeddings. On first use it
-backfills embeddings for any article missing one (cached in the DB, so the
-cost is paid once).
+Run `alembic upgrade head` first. This script never creates schema or changes
+an existing embedding. Changing EMBEDDING_MODEL requires an explicit migration
+of *both* article and claim vectors; mixing vector spaces is unsupported.
 """
 
 import asyncio
 import sys
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from sqlalchemy import select, update
 
-async def ensure_column() -> None:
-    from sqlalchemy import text
+from app.db.postgres import async_session_maker
+from app.models.article import Article, ProcessingStatusEnum
+from app.services.nlp.embedding_service import EmbeddingService
 
-    from app.db.postgres import async_session_maker
 
+async def backfill(limit: int = 100) -> int:
+    if limit < 1:
+        raise ValueError("Batch limit must be positive")
     async with async_session_maker() as db:
-        await db.execute(
-            text(
-                """
-                ALTER TABLE articles
-                ADD COLUMN IF NOT EXISTS embedding vector(768)
-                """
-            )
+        rows = (await db.execute(
+            select(Article.id, Article.title, Article.cleaned_content, Article.content)
+            .where(Article.embedding.is_(None),
+                   Article.processing_status == ProcessingStatusEnum.processed)
+            .order_by(Article.id).limit(limit)
+        )).all()
+    for aid, title, cleaned, content in rows:
+        vector = await asyncio.to_thread(
+            EmbeddingService.generate_document_embedding,
+            f"{title}. {cleaned or content or ''}", allow_load=True,
         )
-        await db.execute(
-            text(
-                """
-                CREATE INDEX IF NOT EXISTS articles_embedding_ix
-                ON articles USING hnsw (embedding vector_cosine_ops)
-                """
-            )
-        )
-        await db.commit()
-
-
-async def backfill(limit: int = 1000) -> int:
-    from sqlalchemy import text
-
-    from app.db.postgres import async_session_maker
-
-    model = _load_model()
-    async with async_session_maker() as db:
-        rows = (
-            await db.execute(
-                text(
-                    """
-                    SELECT id, COALESCE(title,'') || '. ' || COALESCE(cleaned_content,'') AS body
-                    FROM articles
-                    WHERE embedding IS NULL AND processing_status='processed'
-                    LIMIT :lim
-                    """
-                ),
-                {"lim": limit},
-            )
-        ).all()
-        if not rows:
-            return 0
-        vecs = model.encode(
-            [r[1][:2000] for r in rows],
-            batch_size=64,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-            show_progress_bar=True,
-        )
-        for (aid, _), v in zip(rows, vecs):
-            lit = "[" + ",".join(f"{x:.6f}" for x in v.tolist()) + "]"
-            await db.execute(
-                text("UPDATE articles SET embedding = CAST(:v AS vector) WHERE id = CAST(:id AS uuid)"),
-                {"v": lit, "id": str(aid)},
-            )
-        await db.commit()
-        return len(rows)
-
-
-_model = None
-
-
-def _load_model() -> Any:
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-
-        _model = SentenceTransformer("all-mpnet-base-v2")
-    return _model
+        # Commit each finished article so an interrupted backfill resumes safely.
+        async with async_session_maker() as db:
+            await db.execute(update(Article).where(
+                Article.id == aid, Article.embedding.is_(None),
+            ).values(embedding=vector))
+            await db.commit()
+    return len(rows)
 
 
 async def main() -> None:
-    await ensure_column()
     total = 0
-    while True:
-        n = await backfill()
-        total += n
-        print(f"backfilled {total} embeddings so far", flush=True)
-        if n == 0:
-            break
+    while (count := await backfill()):
+        total += count
+        print(f"backfilled {total} embeddings", flush=True)
     print(f"embedding backfill complete: {total} articles")
 
 

@@ -1,6 +1,13 @@
 import { apiClient, type ApiRequestOptions } from './client';
 
-export interface MutationComparisonInput { older_text: string; newer_text: string }
+export interface MutationComparisonInput {
+  older_text: string;
+  newer_text: string;
+  older_timestamp?: string;
+  newer_timestamp?: string;
+  context_note?: string;
+  provenance_url?: string;
+}
 export interface MutationComparison {
   analysis: { mutation_types: string[]; [key: string]: unknown };
   llm_summary?: string;
@@ -20,7 +27,14 @@ export interface CorpusEvidence {
   title: string | null;
   domain: string | null;
   published_at: string | null;
-  similarity: number;
+  similarity: number | null;
+  retrieval_method?: 'vector' | 'keyword' | 'hybrid';
+  collected_at?: string | null;
+  extracted_at?: string | null;
+  passage_start?: number | null;
+  passage_end?: number | null;
+  passage_sha256?: string | null;
+  abstention_reason?: string | null;
   stance: 'entailment' | 'contradiction' | 'neutral';
   syndication_group: string | null;
 }
@@ -36,9 +50,18 @@ export interface ClaimCheckResult {
 
 export interface ExternalCheckResult {
   claim: string;
-  verdict: 'SUPPORTED' | 'DISPUTED' | 'UNVERIFIABLE';
+  verdict: 'SUPPORTED' | 'DISPUTED' | 'SUPPORTED_BY_SOURCES' | 'CONTRADICTED_BY_SOURCES' | 'MIXED_EVIDENCE' | 'UNVERIFIABLE';
   explanation: string;
-  sources: { title: string; url: string }[];
+  observed_at?: string;
+  method_version?: string;
+  warnings?: string[];
+  assessment?: string;
+  sources: {
+    title: string; url: string; passage?: string;
+    stance?: string; abstention_reason?: string | null;
+    revision_id?: number | null; published_at?: string | null;
+    retrieved_at?: string; passage_sha256?: string;
+  }[];
 }
 
 export const featuresApi = {

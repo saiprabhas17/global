@@ -23,9 +23,9 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from redis.asyncio import Redis
 from redis.exceptions import WatchError
@@ -110,9 +110,9 @@ class LeaderLock:
                 current = await pipe.get(key)
                 value = current.decode() if isinstance(current, bytes) else current
                 if value != token:
-                    await pipe.unwatch()
+                    await cast(Callable[[], Awaitable[None]], pipe.unwatch)()
                     return False
-                pipe.multi()
+                cast(Callable[[], None], pipe.multi)()
                 if renew_ms is None:
                     pipe.delete(key)
                 else:

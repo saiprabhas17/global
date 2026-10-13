@@ -1,15 +1,21 @@
 """Read-only endpoints exposing the real corpus + story graph."""
 
+import asyncio
 import html as htmllib
 import logging
 import re
+import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import text
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_db_session
 from app.db.neo4j_client import neo4j_client
-from app.db.postgres import async_session_maker
+from app.models.article import Article, ProcessingStatusEnum
+from app.models.source import Source
+from app.services.nlp.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -19,212 +25,145 @@ router = APIRouter()
 # ---------------------------------------------------------------- articles
 
 
+def _article_row(article: Article, *, body: bool = False) -> dict[str, Any]:
+    result = {
+        "id": str(article.id), "title": _clean_text(article.title, 500),
+        "url": article.url, "author": _clean_text(article.author, 300),
+        "domain": article.domain, "language": article.language,
+        "published_at": article.published_at, "word_count": article.word_count,
+        "nlp_status": article.nlp_status.value,
+    }
+    content = article.cleaned_content or article.content or ""
+    if body:
+        result.update(body=content, collected_at=article.collected_at)
+    else:
+        result["excerpt"] = _clean_text(content)
+    return result
+
+
 @router.get("/articles")
 async def list_articles(
     q: str = Query("", max_length=120),
     domain: str = Query("", max_length=80),
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    """Paginated, searchable corpus listing."""
-    like = f"%{q}%"
-    where = ["processing_status = 'processed'"]
-    params: dict[str, object] = {"limit": limit, "offset": offset}
-    if q:
-        where.append("(title ILIKE :like OR author ILIKE :like)")
-        params["like"] = like
+    """Paginated live corpus listing; user search treats %, _ as literal text."""
+    filters = [Article.processing_status == ProcessingStatusEnum.processed]
+    if q.strip():
+        filters.append(or_(
+            Article.title.icontains(q.strip(), autoescape=True),
+            Article.author.icontains(q.strip(), autoescape=True),
+        ))
     if domain:
-        where.append("domain = :domain")
-        params["domain"] = domain
-    where_sql = " AND ".join(where)
-
-    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
-    async with async_session_maker() as db:
-        total = (
-            await db.execute(
-                text(f"SELECT COUNT(*) FROM articles WHERE {where_sql}"), count_params
-            )
-        ).scalar()
-        rows = (
-            await db.execute(
-                text(
-                    f"""
-                    SELECT id::text, title, url, author, domain, language,
-                           published_at, word_count, nlp_status,
-                           LEFT(COALESCE(cleaned_content, content, ''), 240) AS excerpt
-                    FROM articles
-                    WHERE {where_sql}
-                    ORDER BY published_at DESC NULLS LAST
-                    LIMIT :limit OFFSET :offset
-                    """
-                ),
-                params,
-            )
-        ).all()
-        domains = (
-            await db.execute(
-                text(
-                    "SELECT domain, COUNT(*) AS c FROM articles "
-                    "WHERE processing_status='processed' GROUP BY domain ORDER BY c DESC"
-                )
-            )
-        ).all()
-
+        filters.append(Article.domain == domain)
+    total = await db.scalar(select(func.count(Article.id)).where(*filters))
+    articles = (await db.scalars(
+        select(Article).where(*filters)
+        .order_by(Article.published_at.desc().nullslast(), Article.id)
+        .limit(limit).offset(offset)
+    )).all()
+    domains = (await db.execute(
+        select(Article.domain, func.count(Article.id).label("count"))
+        .where(Article.processing_status == ProcessingStatusEnum.processed,
+               Article.domain.is_not(None))
+        .group_by(Article.domain).order_by(func.count(Article.id).desc(), Article.domain)
+    )).all()
     return {
-        "total": total or 0,
-        "limit": limit,
-        "offset": offset,
-        "items": [
-                    {**{k: _clean_text(v, 300) if isinstance(v, str) and k in ("title", "excerpt", "author", "domain") else v
-                        for k, v in dict(r._mapping).items()}}
-                    for r in rows
-                ],
-        "domains": [{"name": d[0], "count": d[1]} for d in domains],
+        "total": total or 0, "limit": limit, "offset": offset,
+        "items": [_article_row(article) for article in articles],
+        "domains": [{"name": domain, "count": count} for domain, count in domains],
     }
 
 
 @router.get("/articles/recent")
-async def recent_articles(limit: int = Query(12, ge=1, le=40)) -> dict[str, Any]:
-    """Most recently collected articles — the true ingest stream."""
-    async with async_session_maker() as db:
-        rows = (
-            await db.execute(
-                text(
-                    """
-                    SELECT a.id::text AS id, a.title AS title, a.url AS url, a.domain AS domain,
-                           s.name AS source_name,
-                           a.collected_at, a.published_at, a.word_count
-                    FROM articles a
-                    LEFT JOIN sources s ON s.id = a.source_id
-                    WHERE a.processing_status = 'processed'
-                    ORDER BY COALESCE(a.collected_at, a.processed_at) DESC
-                    LIMIT :limit
-                    """
-                ),
-                {"limit": limit},
-            )
-        ).all()
-    items = []
-    for r in rows:
-        m = dict(r._mapping)
-        m["collected_at"] = m["collected_at"].isoformat() if m["collected_at"] else None
-        m["published_at"] = m["published_at"].isoformat() if m["published_at"] else None
-        items.append(m)
-    return {"items": items}
+async def recent_articles(
+    limit: int = Query(12, ge=1, le=40),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Most recently collected processed articles from the live database."""
+    rows = (await db.execute(
+        select(Article, Source.name)
+        .outerjoin(Source, Source.id == Article.source_id)
+        .where(Article.processing_status == ProcessingStatusEnum.processed)
+        .order_by(Article.collected_at.desc(), Article.id).limit(limit)
+    )).all()
+    return {"items": [
+        {**_article_row(article), "collected_at": article.collected_at, "source_name": name}
+        for article, name in rows
+    ]}
 
 
 @router.get("/stats")
-async def corpus_stats() -> dict[str, Any]:
-    """Real corpus statistics for telemetry panels."""
-    async with async_session_maker() as db:
-        row = (
-            await db.execute(
-                text(
-                    """
-                    SELECT COUNT(*) AS total,
-                           COUNT(embedding) AS embedded,
-                           COUNT(DISTINCT domain) AS domains,
-                           MIN(published_at)::date AS earliest,
-                           MAX(published_at)::date AS latest
-                    FROM articles WHERE processing_status='processed'
-                    """
-                )
-            )
-        ).first()
-        nlp = (
-            await db.execute(
-                text(
-                    "SELECT nlp_status, COUNT(*) FROM articles GROUP BY nlp_status"
-                )
-            )
-        ).all()
-    m = dict(row._mapping) if row else {}
+async def corpus_stats(db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    """Corpus statistics work immediately after migrations, including an empty DB."""
+    row = (await db.execute(
+        select(func.count(Article.id), func.count(Article.embedding),
+               func.count(func.distinct(Article.domain)),
+               func.min(Article.published_at), func.max(Article.published_at))
+        .where(Article.processing_status == ProcessingStatusEnum.processed)
+    )).one()
+    nlp = (await db.execute(
+        select(Article.nlp_status, func.count(Article.id)).group_by(Article.nlp_status)
+    )).all()
     return {
-        "total": int(m.get("total") or 0),
-        "embedded": int(m.get("embedded") or 0),
-        "domains": int(m.get("domains") or 0),
-        "earliest": str(m.get("earliest")) if m.get("earliest") else None,
-        "latest": str(m.get("latest")) if m.get("latest") else None,
-        "nlp_counts": {k: int(v) for k, v in nlp},
+        "total": row[0], "embedded": row[1], "domains": row[2],
+        "earliest": row[3].date().isoformat() if row[3] else None,
+        "latest": row[4].date().isoformat() if row[4] else None,
+        "nlp_counts": {status.value: count for status, count in nlp},
     }
-
-
-# ---------------------------------------------------------------- semantic search
 
 
 @router.get("/search")
 async def semantic_search(
     q: str = Query(..., min_length=2, max_length=300),
     limit: int = Query(10, ge=1, le=30),
+    db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    """Nearest-neighbor article search via pgvector cosine distance."""
-    import asyncio
-
-    from sqlalchemy import text as sql_text
-
-    from app.core.config import get_settings
-    from app.services.nlp.embedding_service import EmbeddingService
-
-    if not EmbeddingService.is_loaded() and not get_settings().HUGGINGFACE_API_KEY:
+    """Nearest-neighbor article search; first-use loading stays off the event loop."""
+    query = q.strip()
+    if len(query) < 2:
+        raise HTTPException(status_code=422, detail="Search needs at least two non-space characters.")
+    indexed = await db.scalar(select(func.count(Article.id)).where(
+        Article.embedding.is_not(None),
+        Article.processing_status == ProcessingStatusEnum.processed,
+    ))
+    if not indexed:
+        return {"query": query, "count": 0, "items": []}
+    try:
+        qvec = await asyncio.to_thread(
+            EmbeddingService.generate_embedding, query, allow_load=True,
+        )
+    except Exception as exc:
+        logger.exception("Article search embedding unavailable")
         raise HTTPException(
             status_code=503,
-            detail="Embedding model is not loaded yet (warming up); retry shortly.",
-        )
-    try:
-        qvec = await asyncio.to_thread(EmbeddingService.generate_embedding, q)
-    except Exception:
-        logger.exception("embedding failure")
-        raise HTTPException(status_code=503, detail="Embedding service unavailable; retry later.")
-
-    lit = "[" + ",".join(f"{x:.6f}" for x in qvec) + "]"
-
-    async with async_session_maker() as db:
-        rows = (
-            await db.execute(
-                sql_text(
-                    """
-                    SELECT id::text, title, url, author, domain,
-                           published_at, word_count,
-                           1 - (embedding <=> CAST(:qv AS vector)) AS score
-                    FROM articles
-                    WHERE embedding IS NOT NULL
-                    ORDER BY embedding <=> CAST(:qv AS vector)
-                    LIMIT :lim
-                    """
-                ),
-                {"qv": lit, "lim": limit},
-            )
-        ).all()
-
-    items = []
-    for r in rows:
-        m = dict(r._mapping)
-        m["score"] = round(float(m["score"]), 4)
-        m["published_at"] = m["published_at"].isoformat() if m["published_at"] else None
-        items.append(m)
-
-    return {"query": q, "count": len(items), "items": items}
+            detail="Embedding model unavailable. Check model installation or provider access.",
+        ) from exc
+    distance = Article.embedding.cosine_distance(qvec)
+    rows = (await db.execute(
+        select(Article, (1 - distance).label("score"))
+        .where(Article.embedding.is_not(None),
+               Article.processing_status == ProcessingStatusEnum.processed)
+        .order_by(distance, Article.id).limit(limit)
+    )).all()
+    return {
+        "query": query, "count": len(rows),
+        "items": [{**_article_row(article), "score": round(float(score), 4)}
+                  for article, score in rows],
+    }
 
 
 @router.get("/articles/{article_id}")
-async def article_detail(article_id: str) -> dict[str, Any]:
-    async with async_session_maker() as db:
-        row = (
-            await db.execute(
-                text(
-                    """
-                    SELECT id::text, title, url, author, domain, language,
-                           published_at, collected_at, word_count, nlp_status,
-                           COALESCE(cleaned_content, content, '') AS body
-                    FROM articles WHERE id = CAST(:aid AS uuid)
-                    """
-                ),
-                {"aid": article_id},
-            )
-        ).first()
-    if row is None:
+async def article_detail(
+    article_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    article = await db.get(Article, article_id)
+    if article is None:
         raise HTTPException(status_code=404, detail="article not found")
-    return dict(row._mapping)
+    return _article_row(article, body=True)
 
 
 # ---------------------------------------------------------------- graph

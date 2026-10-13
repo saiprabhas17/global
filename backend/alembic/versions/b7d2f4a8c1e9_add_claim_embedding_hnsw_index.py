@@ -27,5 +27,5 @@ def upgrade() -> None:
     op.execute(_INDEX)
 
 
-def down() -> None:
+def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_claims_embedding_hnsw")

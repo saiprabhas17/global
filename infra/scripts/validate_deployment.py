@@ -264,6 +264,19 @@ def validate_ci_and_render() -> None:
         ),
         "Required integration tests must fail on missing/empty/skipped reports.",
     )
+    require(
+        any(
+            "-m model" in step.get("run", "")
+            and "model-results.xml" in step.get("run", "")
+            for step in steps
+        )
+        and any(
+            "require_integration_results.py model-results.xml" in step.get("run", "")
+            and step.get("if") == "always()"
+            for step in steps
+        ),
+        "Real pretrained model inference must remain a required, non-skippable CI gate.",
+    )
     deployment = load_yaml(".github/workflows/deployment-ci.yml")
     require(
         "http-smoke" in deployment["jobs"],

@@ -1,6 +1,7 @@
 """Anonymous feedback is unverified; database writes and client identity are mocked."""
 
 import hashlib
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
@@ -128,7 +129,7 @@ async def test_duplicate_vote_identity_uses_canonical_ip_not_ua_or_untrusted_hea
         assert response.status_code == 201
     statements = [call.args[0] for call in feedback_db.execute.call_args_list[1::2]]
     hashes = [
-        statement.compile(dialect=postgresql.dialect()).params["client_hash"]
+        statement.compile(dialect=cast(Any, postgresql.dialect)()).params["client_hash"]
         for statement in statements
     ]
     expected = hashlib.sha256(b"203.0.113.10").hexdigest()
@@ -136,7 +137,7 @@ async def test_duplicate_vote_identity_uses_canonical_ip_not_ua_or_untrusted_hea
     assert resolver.call_count == 2
     assert all(
         "ON CONFLICT ON CONSTRAINT uq_verdict_feedback_claim_client DO UPDATE"
-        in str(statement.compile(dialect=postgresql.dialect()))
+        in str(statement.compile(dialect=cast(Any, postgresql.dialect)()))
         for statement in statements
     )
 

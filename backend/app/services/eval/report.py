@@ -22,6 +22,8 @@ from app.services.eval.provenance import (
     pair_consensus,
 )
 
+__all__ = ["consensus"]
+
 POSITIVE_LABELS = ("SAME_STORY", "EVOLVED")
 ENGINE_OPERATING_POINT = 0.60
 THRESHOLD_SWEEP = (0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90)

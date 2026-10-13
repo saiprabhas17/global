@@ -36,6 +36,8 @@ jobs:
       RATE_LIMIT_ENABLED: 'false'
       CI: 'true'
       GMEE_REQUIRE_INTEGRATION: '1'
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
       POSTGRES_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/gmee
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/gmee
       NEO4J_URI: neo4j://localhost:7687
@@ -73,7 +75,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .[dev]
+          pip install --no-deps 'torch==2.14.1+cpu' --index-url https://download.pytorch.org/whl/cpu
+          pip install -c requirements.lock -e .[dev]
+          pip install -c requirements.lock 'https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl'
+
+      - name: Cache pretrained model files
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: gmee-models-${{ runner.os }}-mpnet-flan-deberta-v2
 
       - name: Lint with Ruff
         run: ruff check app tests scripts
@@ -82,7 +92,17 @@ jobs:
         run: mypy app tests scripts
 
       - name: Test with pytest
-        run: pytest --strict-markers --cov=app --cov-report=term --cov-fail-under=70 -m "not integration"
+        run: pytest --strict-markers --cov=app --cov-report=term --cov-fail-under=70 -m "not integration and not model"
+
+      - name: Required real pretrained NLP smoke
+        timeout-minutes: 8
+        run: |
+          python scripts/prepare_models.py
+          pytest tests/test_nlp_components.py tests/test_model_pipeline.py -m model -o addopts='' --strict-markers -v --junitxml=model-results.xml
+
+      - name: Reject skipped or empty model smoke
+        if: always()
+        run: python ../infra/scripts/require_integration_results.py model-results.xml
 
       - name: Migrate the integration database
         run: alembic upgrade head

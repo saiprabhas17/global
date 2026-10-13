@@ -107,8 +107,9 @@ def _csv_predictions(predictions: list[dict[str, Any]]) -> str:
             row[key] = canonical_json(row[key]) if row[key] is not None else ""
         # Spreadsheet formulas are not part of a claim's text; CSV keeps them inert.
         for key in ("text_a", "text_b", "event_id", "dataset_version", "pair_id"):
-            if isinstance(row[key], str) and row[key].startswith(("=", "+", "-", "@", "\t", "\r")):
-                row[key] = "'" + row[key]
+            value = row[key]
+            if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
+                row[key] = "'" + value
         writer.writerow(row)
     return output.getvalue()
 

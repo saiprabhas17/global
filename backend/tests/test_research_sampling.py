@@ -4,16 +4,18 @@ import random
 import uuid
 from collections import Counter
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from sqlalchemy.dialects import postgresql
 
 from scripts.sample_eval_pairs import fetch_pool, main, pick_pairs, pool_fingerprint
 
 
-def pool(size=30, identical=False):
+def pool(size: int = 30, identical: bool = False) -> list[tuple[str, NDArray[np.float64], str]]:
     rng = np.random.default_rng(42)
     return [(str(uuid.UUID(int=100 + i)), np.asarray([1.0, 0.0, 0.0]) if identical else rng.normal(size=3), f"outlet-{i % 3}") for i in range(size)]
 
@@ -67,30 +69,30 @@ async def test_database_pool_is_seeded_stable_not_sql_random(monkeypatch):
 
 
 class FakeResult:
-    def __init__(self, rows=None, value=None):
+    def __init__(self, rows: list[Any] | None = None, value: Any = None) -> None:
         self.rows = rows or []
         self.value = value
 
-    def all(self):
+    def all(self) -> list[Any]:
         return self.rows
 
-    def scalar_one_or_none(self):
+    def scalar_one_or_none(self) -> Any:
         return self.value
 
 
 class PairStore:
-    def __init__(self):
-        self.pairs = {}
-        self.statements = []
+    def __init__(self) -> None:
+        self.pairs: dict[str, dict[str, Any]] = {}
+        self.statements: list[str] = []
         self.commits = 0
 
-    def get_bind(self):
+    def get_bind(self) -> SimpleNamespace:
         return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
 
-    async def execute(self, statement):
+    async def execute(self, statement: Any) -> FakeResult:
         self.statements.append(str(statement))
         if getattr(statement, "is_insert", False):
-            values = statement.compile(dialect=postgresql.dialect()).params
+            values = statement.compile(dialect=cast(Any, postgresql.dialect)()).params
             key = values["canonical_key"]
             if key in self.pairs:
                 return FakeResult()
@@ -100,7 +102,7 @@ class PairStore:
             return FakeResult(rows=[(str(p["claim_a_id"]), str(p["claim_b_id"]), p["split"]) for p in self.pairs.values()])
         return FakeResult()
 
-    async def commit(self):
+    async def commit(self) -> None:
         self.commits += 1
 
 

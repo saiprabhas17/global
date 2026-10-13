@@ -1,26 +1,28 @@
 """Graph IDs, inferred edge metadata and bounded simulation contracts."""
 
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
 
 from app.api.v1 import graph as graph_api
+from app.db.neo4j_client import neo4j_client
 from app.services.evolution.text_changes import analyze_text_change
 
 
-def _id(n):
+def _id(n) -> str:
     return str(uuid.UUID(int=n))
 
 
-def _result(rows):
+def _result(rows) -> MagicMock:
     result = MagicMock()
     result.all.return_value = rows
     return result
 
 
-def _database(monkeypatch, results):
+def _database(monkeypatch, results) -> MagicMock:
     db = MagicMock()
     db.execute = AsyncMock(side_effect=results)
     context = AsyncMock()
@@ -29,7 +31,7 @@ def _database(monkeypatch, results):
     return db
 
 
-def _neo4j(monkeypatch, handler):
+def _neo4j(monkeypatch, handler) -> MagicMock:
     async def run(query, **params):
         result = MagicMock()
         result.data = AsyncMock(return_value=handler(query, params))
@@ -48,7 +50,7 @@ def _neo4j(monkeypatch, handler):
     driver = MagicMock()
     driver.session.return_value = context
     monkeypatch.setattr(
-        graph_api.neo4j_client, "get_driver", AsyncMock(return_value=driver)
+        neo4j_client, "get_driver", AsyncMock(return_value=driver)
     )
     return tx
 
@@ -124,14 +126,14 @@ async def test_timeline_resolves_legacy_claim_id_to_article_id_without_relabelin
 @pytest.mark.asyncio
 async def test_timeline_rejects_invalid_id_before_any_graph_access(monkeypatch):
     get_driver = AsyncMock()
-    monkeypatch.setattr(graph_api.neo4j_client, "get_driver", get_driver)
+    monkeypatch.setattr(neo4j_client, "get_driver", get_driver)
     with pytest.raises(HTTPException) as error:
         await graph_api.timeline_clusters(article_id="not-an-id")
     assert error.value.status_code == 400
     get_driver.assert_not_awaited()
 
 
-def _simulation_handler(links, *, exists=True):
+def _simulation_handler(links, *, exists=True) -> Any:
     def handler(query, params):
         if "RETURN a.title" in query:
             return [{"title": "Hub story", "domain": "one.example"}] if exists else []

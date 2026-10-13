@@ -8,6 +8,7 @@ No heavy model downloads are needed for these unit tests.
 
 import re
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -110,7 +111,7 @@ def test_entity_and_lexical_ignore_engine_score(texts):
     from scripts.auto_label_eval_pairs import entity_label
 
     for signal in (entity_label, lexical_label):
-        labels = {signal(*texts, score) for score in (-1.0, 0.0, 0.59, 0.9, 1.0, float("nan"))}
+        labels = {signal(texts[0], texts[1], score) for score in (-1.0, 0.0, 0.59, 0.9, 1.0, float("nan"))}
         assert len(labels) == 1
 
 
@@ -138,7 +139,7 @@ async def test_save_labels_explicit_automatic_and_conflict_safe(monkeypatch):
     votes = [{"pair_id": "11111111-1111-1111-1111-111111111111", "annotator": ANNOTATOR_LEXICAL, "label": "SAME_STORY", "origin": "human"}]
     assert await save_labels(votes) == 1
     statement = db.execute.call_args.args[0]
-    compiled = statement.compile(dialect=postgresql.dialect())
+    compiled = statement.compile(dialect=cast(Any, postgresql.dialect)())
     assert compiled.params["origin"] == "automatic"  # Caller cannot upgrade a machine signal.
     assert compiled.params["provenance"]["independent_human"] is False
     assert "DO NOTHING" in str(compiled) and "DELETE" not in str(compiled)

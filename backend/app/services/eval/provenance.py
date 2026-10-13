@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections import Counter, defaultdict
 from typing import Any
+
+from app.services.eval.annotation import RUBRIC_VERSION
 
 LABELS = ("SAME_STORY", "EVOLVED", "DISTINCT")
 ORIGINS = ("human", "automatic", "legacy", "test")
@@ -56,6 +59,28 @@ def pair_consensus(votes: list[dict[str, Any]]) -> dict[str, Any]:
             else:
                 mutation_status = "agreed"
                 mutation_types = list(known[0])
+    annotation_results: dict[str, Any] = {}
+    for field in ("context_relation", "changed_spans"):
+        values = [
+            v.get("provenance", {}).get(field)
+            if isinstance(v.get("provenance"), dict)
+            and v["provenance"].get("rubric_version") == RUBRIC_VERSION else None
+            for vs in by_user.values() for v in vs
+        ]
+        known_values = [value for value in values if value is not None]
+        # Span equality is exact; overlapping spans do not silently become gold.
+        encoded = {json.dumps(value, sort_keys=True, ensure_ascii=False) for value in known_values}
+        annotation_status = "not_annotated"
+        agreed_value = None
+        if status == "agreed" and known_values:
+            if len(encoded) > 1:
+                annotation_status = "disagreement"
+            elif len(known_values) != len(values):
+                annotation_status = "incomplete"
+            else:
+                annotation_status, agreed_value = "agreed", known_values[0]
+        annotation_results[f"{field}_status"] = annotation_status
+        annotation_results[field] = agreed_value
     return {
         "status": status,
         "label": next(iter(labels)) if status == "agreed" else None,
@@ -63,6 +88,7 @@ def pair_consensus(votes: list[dict[str, Any]]) -> dict[str, Any]:
         "human_user_ids": sorted(by_user),
         "mutation_status": mutation_status,
         "mutation_types": mutation_types,
+        **annotation_results,
         "rule": CONSENSUS_RULE,
     }
 
@@ -108,7 +134,8 @@ def exploratory_consensus(rows: list[dict[str, Any]], origin: str) -> list[dict[
         winners = [label for label, n in counts.items() if n == max(counts.values())]
         if len(winners) != 1:
             continue
-        base = dict(min(votes, key=lambda v: str(v.get("annotator", ""))))
+        chosen = min(votes, key=lambda v: str(v.get("annotator", "")))
+        base = dict(chosen)
         base.update({"pid": pid, "label": winners[0], "votes": [str(v["label"]) for v in votes]})
         output.append(base)
     return output

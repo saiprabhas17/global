@@ -41,7 +41,7 @@ def test_candidate_search_never_materializes_square_similarity(monkeypatch):
         assert result.ndim == 1
         return result
 
-    monkeypatch.setattr(similarity.np, "matmul", bounded_matmul)
+    monkeypatch.setattr(np, "matmul", bounded_matmul)
     neighbors = similarity.top_neighbors(
         unit, 256, limit=5, threshold=0.8, block_size=11
     )

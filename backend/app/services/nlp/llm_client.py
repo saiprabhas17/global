@@ -1,11 +1,14 @@
+import asyncio
 import json
 import logging
 import os
+import re
+import threading
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 from anthropic import AsyncAnthropic
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.core.config import get_settings
 
@@ -13,8 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 class ExtractedClaim(BaseModel):
-    claim_text: str
-    confidence: float | None = None
+    claim_text: str = Field(min_length=1)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @field_validator("claim_text")
+    @classmethod
+    def nonempty_claim(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Claim text must not be blank")
+        return value
 
 
 class LLMClient(ABC):
@@ -127,7 +138,7 @@ Chronological Claims:
                 "messages": [{"role": "user", "content": prompt}],
             }
             response = await self.client.messages.create(**params)
-            return response.content[0].text.strip()
+            return str(response.content[0].text).strip()
         except Exception as e:
             logger.error(f"Anthropic API error during mutation summary: {e}")
             return "Unable to generate summary due to API error."
@@ -176,12 +187,23 @@ class HuggingFaceLLMClient(LLMClient):
     """
 
     MODEL_ID = os.environ.get("HF_LLM_MODEL", "google/flan-t5-base")
+    BATCH_SIZE = 8
+    _loaded_pipes: ClassVar[dict[str, tuple[Any, Any, str]]] = {}
+    _load_lock = threading.Lock()
+    _inference_lock = threading.Lock()
 
     def __init__(self) -> None:
         self._pipe: tuple[Any, Any, str] | None = None
 
     def _load(self) -> None:
-        if self._pipe is None:
+        if self._pipe is not None:
+            return
+        # Orchestrators are short-lived; share the expensive model between them.
+        # The lock also prevents concurrent first requests loading duplicate copies.
+        with self._load_lock:
+            if self.MODEL_ID in self._loaded_pipes:
+                self._pipe = self._loaded_pipes[self.MODEL_ID]
+                return
             import torch
             from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
@@ -191,13 +213,20 @@ class HuggingFaceLLMClient(LLMClient):
             mdl = AutoModelForSeq2SeqLM.from_pretrained(self.MODEL_ID)
             mdl.to(device).eval()
             self._pipe = (tok, mdl, device)
+            self._loaded_pipes[self.MODEL_ID] = self._pipe
             logger.info("HF claim-extraction model loaded.")
 
     def _split_sentences(self, text: str) -> list[str]:
-        import re
+        # Keep short factual sentences and long ones; neither length nor article
+        # position determines whether a sentence deserves analysis. A lightweight
+        # English tokenizer handles abbreviations ("Dr.", "U.S.") and decimals.
+        import spacy
 
-        parts = re.split(r"(?<=[.!?])\s+", text.strip())
-        return [p.strip() for p in parts if 30 < len(p.strip()) < 400]
+        segmenter = spacy.blank("en")
+        segmenter.add_pipe("sentencizer")
+        segmenter.max_length = max(segmenter.max_length, len(text) + 1)
+        return [span.text.strip() for span in segmenter(text).sents
+                if len(span.text.split()) >= 3 and any(ch.isalpha() for ch in span.text)]
 
     def _score_claim(self, sentence: str) -> float:
         """Heuristic confidence from structural verifiability signals."""
@@ -221,57 +250,96 @@ class HuggingFaceLLMClient(LLMClient):
         return round(min(0.97, max(0.05, base)), 2)
 
     async def extract_claims(self, article_text: str) -> list[ExtractedClaim]:
-        import asyncio
-
-        self._load()
-        sentences = self._split_sentences(article_text)
-        if not sentences:
-            return []
-
-        prompts = [
-            (
-                f'premise: {s} hypothesis: {s} This statement is a factual claim. '
-                f'Does the premise entail the hypothesis?'
-            )
-            for s in sentences[:8]  # cap per-article cost on CPU
-        ]
-
-        def run_pipeline() -> list[dict[str, str]]:
+        def run_pipeline() -> list[ExtractedClaim]:
             import torch
 
+            sentences = self._split_sentences(article_text)
+            if not sentences:
+                return []
+            self._load()
             pipe = self._pipe
             assert pipe is not None
             tok, mdl, device = pipe
-            inputs = tok(prompts, return_tensors="pt", padding=True, truncation=True, max_length=512)
-            inputs = {k: v.to(device) for k, v in inputs.items()}
-            with torch.no_grad():
-                out_ids = mdl.generate(**inputs, max_new_tokens=6, do_sample=False)
-            decoded = tok.batch_decode(out_ids, skip_special_tokens=True)
-            return [{"generated_text": t} for t in decoded]
+            # Classify bounded overlapping windows for every sentence, including
+            # the end of long articles. Return original source sentences, never
+            # generated facts. This is check-worthiness, not truth verification.
+            windows: list[tuple[int, str]] = []
+            for index, sentence in enumerate(sentences):
+                words = sentence.split()
+                for start in range(0, len(words), 120):
+                    window = " ".join(words[start:start + 144])
+                    windows.append((index, (
+                        f"Classify the sentence as factual or opinion: {window}"
+                    )))
+                    if start + 144 >= len(words):
+                        break
+            accepted: set[int] = set()
+            for start in range(0, len(windows), self.BATCH_SIZE):
+                batch = windows[start:start + self.BATCH_SIZE]
+                prompts = [prompt for _, prompt in batch]
+                # Generation shares model state; serialize it across HTTP/jobs.
+                with self._inference_lock, torch.inference_mode():
+                    inputs = tok(prompts, return_tensors="pt", padding=True,
+                                 truncation=True, max_length=512)
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                    out_ids = mdl.generate(**inputs, max_new_tokens=6, do_sample=False)
+                    decoded = tok.batch_decode(out_ids, skip_special_tokens=True)
+                for (index, _), answer in zip(batch, decoded, strict=True):
+                    if re.fullmatch(r"(?:factual|yes)[.!]?", str(answer).strip(), re.IGNORECASE):
+                        accepted.add(index)
+            claims: list[ExtractedClaim] = []
+            seen: set[str] = set()
+            for index, sentence in enumerate(sentences):
+                confidence = self._score_claim(sentence)
+                # The structural score is disclosed metadata, not a second
+                # classifier: Roman numerals/names such as Artemis I must not
+                # be discarded by the first-person heuristic.
+                if index in accepted and not sentence.endswith("?") and sentence not in seen:
+                    claims.append(ExtractedClaim(claim_text=sentence, confidence=confidence))
+                    seen.add(sentence)
+            return claims
 
         try:
-            outputs = await asyncio.to_thread(run_pipeline)
+            return await asyncio.to_thread(run_pipeline)
         except Exception as e:
             logger.error(f"HF pipeline error: {e}")
             raise
 
-        claims: list[ExtractedClaim] = []
-        for sent, out in zip(sentences, outputs):
-            if isinstance(out, list):
-                out = out[0] if out else {}
-            answer = (out.get("generated_text", "") or "").strip().lower()
-            confidence = self._score_claim(sent)
-            if answer == "yes" and confidence >= 0.5:
-                claims.append(ExtractedClaim(claim_text=sent, confidence=confidence))
-        return claims
-
     async def generate_mutation_summary(self, claims: list[str]) -> str:
-        # FLAN-T5-base is too small for coherent generative summarization of this type.
-        # We return a placeholder indicating the limitation.
-        return f"Cluster contains {len(claims)} related claims. (Local HF model cannot generate mutation summaries - Anthropic API key required)."
+        from app.services.evolution.text_changes import analyze_text_change
+
+        if not claims:
+            return "No claims are available to compare."
+        if len(claims) == 1:
+            return "One claim is available; at least two are needed to describe changes."
+        analysis = analyze_text_change(claims[0], claims[-1])
+        details = "; ".join(
+            f"{change['older_span']['text'] or '(absent)'} → "
+            f"{change['newer_span']['text'] or '(absent)'}"
+            for change in analysis["changed_spans"][:4]
+        )
+        change_text = f"Text changes: {details}. " if details else ""
+        return (
+            f"Compared the first and last of {len(claims)} ordered claims. "
+            f"{change_text}{analysis['relation_explanation']} "
+            "This text comparison does not establish truth or transmission."
+        )
 
     async def check_external_claim(self, claim: str, context: str) -> dict[str, str]:
-        return {"verdict": "UNVERIFIABLE", "explanation": "External check requires Anthropic API Key."}
+        from app.services.verdict.engine import NLIUnavailableError, classify_stance
+
+        if not claim.strip() or not context.strip():
+            return {"verdict": "UNVERIFIABLE", "explanation": "A claim and evidence passage are required."}
+        try:
+            result = await classify_stance(claim, context)
+        except NLIUnavailableError:
+            return {"verdict": "UNVERIFIABLE", "explanation": "The local stance model is unavailable; prepare its cached weights."}
+        verdict = {"entailment": "SUPPORTED", "contradiction": "DISPUTED", "neutral": "UNVERIFIABLE"}[result.stance]
+        return {"verdict": verdict, "explanation": (
+            f"The supplied passage has {result.stance} stance toward this claim. "
+            "Textual stance does not establish independent factual truth."
+            + (f" Assessment abstained: {result.abstention_reason}." if result.abstention_reason else "")
+        )}
 
 
 def get_llm_client() -> LLMClient:

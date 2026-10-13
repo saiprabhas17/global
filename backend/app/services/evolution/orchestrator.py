@@ -51,7 +51,8 @@ class EvolutionOrchestrator:
             return {
                 "status": "insufficient_data",
                 "claims_available": total_claims,
-                "minimum_required": min_corpus
+                "minimum_required": min_corpus,
+                "graph_projection": await self.neo4j_writer.sync_persisted_graph(db),
             }
 
         # 2. Debounce guard
@@ -72,7 +73,8 @@ class EvolutionOrchestrator:
                         "status": "debounced",
                         "new_claims": new_claims,
                         "minimum_new_required": min_new,
-                        "last_run_at": last_run.run_at.isoformat()
+                        "last_run_at": last_run.run_at.isoformat(),
+                        "graph_projection": await self.neo4j_writer.sync_persisted_graph(db),
                     }
 
         logger.info(f"Starting evolution cycle (force={force}). Corpus size: {total_claims}")

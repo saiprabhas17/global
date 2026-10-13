@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.article import Article
 from app.models.claim import Claim
@@ -14,13 +17,13 @@ from app.services.eval.dataset import SCHEMA_VERSION
 from app.services.eval.provenance import origin_counts, pair_consensus
 
 
-def fixture_user_id(index):
+def fixture_user_id(index: int) -> uuid.UUID:
     # PostgreSQL UUID declarations have numeric affinity in SQLite: a hex UUID
     # like ...03e9 can be interpreted as scientific notation instead of text.
     return uuid.uuid5(uuid.NAMESPACE_URL, f"gmee-synthetic-eval-user:{index}")
 
 
-def human_vote(pid, label, user=1, mutations=None):
+def human_vote(pid: str, label: str, user: int = 1, mutations: list[str] | None = None) -> dict[str, Any]:
     user_id = str(fixture_user_id(user))
     return {
         "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"synthetic-vote:{pid}:{user}")),
@@ -30,8 +33,8 @@ def human_vote(pid, label, user=1, mutations=None):
     }
 
 
-def research_records(mutations=False, groups=3):
-    records = []
+def research_records(mutations: bool = False, groups: int = 3) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
     for split_index, split in enumerate(("train", "dev", "test")):
         for group in range(groups):
             event = f"{split}-event-{group}"
@@ -65,7 +68,7 @@ def research_records(mutations=False, groups=3):
     return records
 
 
-async def seed_user(db, index=1, role=RoleEnum.user):
+async def seed_user(db: AsyncSession, index: int = 1, role: RoleEnum = RoleEnum.user) -> User:
     user_id = fixture_user_id(index)
     user = await db.get(User, user_id)
     if user is None:
@@ -75,8 +78,13 @@ async def seed_user(db, index=1, role=RoleEnum.user):
     return user
 
 
-async def seed_pair(db, *, sim=0.75, split="unassigned", event="unassigned", claim_a=None, claim_b=None, pair_id=None, sampled_at=None, text_a=None, text_b=None):
-    async def make_claim(side, supplied_text):
+async def seed_pair(
+    db: AsyncSession, *, sim: float = 0.75, split: str = "unassigned",
+    event: str = "unassigned", claim_a: Claim | None = None, claim_b: Claim | None = None,
+    pair_id: uuid.UUID | None = None, sampled_at: datetime | None = None,
+    text_a: str | None = None, text_b: str | None = None,
+) -> tuple[EvalPair, Claim, Claim]:
+    async def make_claim(side: str, supplied_text: str | None) -> Claim:
         source = Source(name=f"Synthetic {side}", type=SourceTypeEnum.rss, url_or_identifier=f"https://{side}.example/feed")
         db.add(source)
         await db.flush()

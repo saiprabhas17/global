@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface DialogProps {
   labelledBy: string;
@@ -50,7 +51,7 @@ export function Dialog({ labelledBy, onClose, children, className, backdropClass
     };
   }, []);
 
-  return (
+  return createPortal(
     <div
       className={backdropClassName ?? 'fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4'}
       onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
@@ -65,6 +66,7 @@ export function Dialog({ labelledBy, onClose, children, className, backdropClass
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

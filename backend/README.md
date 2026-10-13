@@ -36,7 +36,9 @@ cd backend
 python -m venv .venv
 # POSIX: source .venv/bin/activate
 # Windows PowerShell: .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
+python -m pip install --no-deps 'torch==2.14.1+cpu' --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -c requirements.lock -e ".[dev]"
+python -m spacy download en_core_web_sm
 ```
 
 Configure private environment locally; never print or commit secrets. Runtime
@@ -51,6 +53,7 @@ providers, migrations and job safety have been reviewed.
 Apply schema before serving the local process:
 
 ```bash
+python scripts/prepare_models.py
 alembic upgrade head
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
@@ -58,6 +61,8 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 Local Swagger/ReDoc/OpenAPI: `/docs`, `/redoc`, `/openapi.json`. Liveness:
 `/api/v1/health`; readiness: `/api/v1/health/ready` (all stores must be OK).
 A successful liveness response is not readiness or loaded-model availability.
+`requirements.lock` records the tested Python 3.11/Linux CPU dependency set;
+CI and Docker apply it. Validate a new environment before changing pins.
 
 ## Container deployment
 
@@ -79,8 +84,8 @@ coordinated migration phase before API replicas rather than racing per-replica
 DDL. Do not stamp head or remove historical data to force an upgrade through.
 
 `gmee01` adds typed edge evidence/one-parent integrity, `gmee02` adds authenticated
-label origin/history and split/event identity, and main's `gmee03` adds durable
-pipeline ownership/jobs. Review a restored isolated snapshot before applying
+label origin/history and split/event identity, `gmee03` adds durable pipeline ownership/jobs, and `gmee04` adds migrated article
+vectors/HNSW and claim full-text/GIN search. Review a restored isolated snapshot before applying
 these to existing data. Full instructions: [upgrade runbook](../docs/OPERATIONS.md).
 
 ## API and epistemic contracts
@@ -115,7 +120,8 @@ reconciled with source/client docs before release, not hand-edited here.
 # From backend, with dev dependencies installed:
 ruff check app tests scripts
 mypy app tests scripts
-pytest -m "not integration" --strict-markers --cov=app --cov-fail-under=70
+pytest -m "not integration and not model" --strict-markers --cov=app --cov-fail-under=70
+pytest -m model -o addopts='' --strict-markers
 ```
 
 Unit tests use SQLite shims and mocks; they cannot prove pgvector SQL/index,
@@ -170,3 +176,5 @@ creates sensitive plaintext archives, not encrypted or restore-verified backups.
 Use [Operations](../docs/OPERATIONS.md) for isolated restore procedures, retention,
 Windows ACLs and Neo4j/Redis recovery boundaries. No live backup/restore was run
 as part of this infrastructure validation.
+
+Current executed validation is recorded in [Verification](../docs/VERIFICATION.md).

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
+import { renderWithClient } from './helpers';
 import { ClusterDossier } from '../src/components/ClusterDossier';
 import type { TimelineCluster } from '../src/api/timeline';
 
@@ -33,7 +34,7 @@ const cluster: TimelineCluster = {
 };
 
 const renderDossier = (isFocused = false) =>
-  render(
+  renderWithClient(
     <ClusterDossier cluster={cluster} isFocused={isFocused} onClose={() => vi.fn()} />,
   );
 

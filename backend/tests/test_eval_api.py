@@ -63,7 +63,7 @@ def test_blinded_payload_carries_no_engine_cues():
 
 def test_every_declared_label_is_accepted():
     for label in VALID_LABELS:
-        body = EvalLabelBody(pair_id=PAIR_ID, annotator="tester", label=label)
+        body = EvalLabelBody.model_validate({"pair_id": PAIR_ID, "annotator": "tester", "label": label})
         assert body.label == label
         assert body.pair_id == uuid.UUID(PAIR_ID)
 
@@ -87,12 +87,12 @@ def test_per_annotator_is_empty_without_labels():
 
 def test_unknown_label_is_rejected():
     with pytest.raises(ValidationError):
-        EvalLabelBody(pair_id=PAIR_ID, annotator="tester", label="MAYBE")
+        EvalLabelBody.model_validate({"pair_id": PAIR_ID, "annotator": "tester", "label": "MAYBE"})
 
 
 def test_annotator_must_be_non_empty():
     with pytest.raises(ValidationError):
-        EvalLabelBody(pair_id=PAIR_ID, annotator="", label="DISTINCT")
+        EvalLabelBody.model_validate({"pair_id": PAIR_ID, "annotator": "", "label": "DISTINCT"})
 
 
 @pytest.mark.asyncio
@@ -121,7 +121,7 @@ def test_eval_routes_are_mounted():
     from app.main import app
 
     paths = set(app.openapi()["paths"])
-    for path in ("/api/v1/eval/next", "/api/v1/eval/label", "/api/v1/eval/progress", "/api/v1/eval/report", "/api/v1/eval/export", "/api/v1/eval/splits"):
+    for path in ("/api/v1/eval/next", "/api/v1/eval/label", "/api/v1/eval/progress", "/api/v1/eval/report", "/api/v1/eval/export", "/api/v1/eval/splits", "/api/v1/eval/rubric", "/api/v1/eval/review/next"):
         assert path in paths
 
 
@@ -145,19 +145,19 @@ async def signed_in(async_client, db_session):
 ])
 def test_label_bounds_and_provenance_are_enforced(extra):
     with pytest.raises(ValidationError):
-        EvalLabelBody(pair_id=PAIR_ID, label="EVOLVED", **extra)
+        EvalLabelBody.model_validate({"pair_id": PAIR_ID, "label": "EVOLVED", **extra})
 
 
 def test_original_label_body_and_optional_annotations_are_compatible():
-    body = EvalLabelBody(pair_id=PAIR_ID, label="EVOLVED")
+    body = EvalLabelBody(pair_id=uuid.UUID(PAIR_ID), label="EVOLVED")
     assert body.model_dump()["annotator"] is None and body.mutation_types is None
-    body = EvalLabelBody(pair_id=PAIR_ID, label="EVOLVED", mutation_types=["NUMERIC_DRIFT", " NUMERIC_DRIFT ", "HEDGING_SHIFT"], notes="Manual comparison")
+    body = EvalLabelBody(pair_id=uuid.UUID(PAIR_ID), label="EVOLVED", mutation_types=["NUMERIC_DRIFT", " NUMERIC_DRIFT ", "HEDGING_SHIFT"], notes="Manual comparison")
     assert body.mutation_types == ["HEDGING_SHIFT", "NUMERIC_DRIFT"]
 
 
 @pytest.mark.asyncio
 async def test_every_eval_read_requires_authentication(async_client):
-    for url in ("/next", "/progress", "/report", "/export?dataset_version=v1"):
+    for url in ("/next", "/progress", "/report", "/export?dataset_version=v1", "/rubric", "/review/next"):
         response = await async_client.get(f"/api/v1/eval{url}")
         assert response.status_code == 401
     response = await async_client.post("/api/v1/eval/label", json={"pair_id": PAIR_ID, "label": "DISTINCT", "annotator": "forged"})
@@ -340,3 +340,70 @@ async def test_real_bearer_identity_not_client_identity(async_client, db_session
     response = await async_client.post("/api/v1/eval/label", headers={"Authorization": f"Bearer {token}"}, json={"pair_id": str(pair.id), "label": "DISTINCT", "annotator": "untrusted-client"})
     assert response.status_code == 201
     assert response.json()["annotator"] == f"user:{me.json()['id']}"
+
+
+@pytest.mark.asyncio
+async def test_span_annotations_are_exact_versioned_and_keep_revisions(signed_in, db_session):
+    client, _ = signed_in
+    pair, _, _ = await seed_pair(db_session, text_a="🚀 Atlas has 10 flights", text_b="🚀 Atlas has 12 flights")
+    await db_session.commit()
+    span = {"side": "a", "start": 12, "end": 14, "text": "10", "mutation_type": "NUMERIC_DRIFT"}
+    body = {"pair_id": str(pair.id), "label": "EVOLVED", "mutation_types": ["NUMERIC_DRIFT"], "context_relation": "INSUFFICIENT_CONTEXT", "changed_spans": [span, span]}
+    recorded = await client.post("/api/v1/eval/label", json=body)
+    assert recorded.status_code == 201, recorded.text
+    assert recorded.json()["rubric_version"] == "claim-pairs-v2"
+    assert recorded.json()["changed_spans"] == [span]
+    invalid = await client.post("/api/v1/eval/label", json={**body, "changed_spans": [{**span, "start": 13, "end": 15}]})
+    assert invalid.status_code == 422  # UTF-16 offset is invalid after the emoji.
+    inconsistent = await client.post("/api/v1/eval/label", json={**body, "mutation_types": []})
+    assert inconsistent.status_code == 422
+    await client.post("/api/v1/eval/label", json={"pair_id": str(pair.id), "label": "EVOLVED", "notes": "Reviewed independently"})
+    vote = (await db_session.execute(select(EvalPairLabel))).scalar_one()
+    assert vote.provenance["changed_spans"] == [span]
+    assert len(vote.history) == 1
+    await client.post("/api/v1/eval/label", json={"pair_id": str(pair.id), "label": "EVOLVED", "changed_spans": []})
+    await db_session.refresh(vote)
+    assert vote.provenance["changed_spans"] == []
+    assert vote.history[-1]["provenance"]["changed_spans"] == [span]
+    rubric = await client.get("/api/v1/eval/rubric")
+    assert rubric.status_code == 200 and rubric.json()["version"] == "claim-pairs-v2"
+
+
+@pytest.mark.asyncio
+async def test_disagreement_queue_is_blinded_independent_and_never_overrides_dissent(signed_in, db_session):
+    client, _user = signed_in
+    pair, _, _ = await seed_pair(db_session)
+    other = await seed_user(db_session, index=2)
+    reviewer = await seed_user(db_session, index=3, role=RoleEnum.admin)
+    await db_session.commit()
+    assert (await client.get("/api/v1/eval/review/next")).status_code == 403
+    await client.post("/api/v1/eval/label", json={"pair_id": str(pair.id), "label": "EVOLVED"})
+    app.dependency_overrides[get_current_user] = lambda: other
+    await client.post("/api/v1/eval/label", json={"pair_id": str(pair.id), "label": "DISTINCT"})
+    app.dependency_overrides[get_current_user] = lambda: reviewer
+    selected = await client.get("/api/v1/eval/review/next")
+    assert selected.status_code == 200
+    assert selected.json()["pair"]["pair_id"] == str(pair.id)
+    assert set(selected.json()["pair"]) == {"pair_id", "a", "b"}
+    assert not any(cue in selected.text for cue in ("sim_score", "annotator", "EVOLVED", "DISTINCT"))
+    await client.post("/api/v1/eval/label", json={"pair_id": str(pair.id), "label": "EVOLVED"})
+    assert (await client.get("/api/v1/eval/review/next")).json() == {"done": True, "pair": None}
+    progress = (await client.get("/api/v1/eval/progress")).json()
+    assert progress["disagreement_pairs"] == 1 and progress["consensus_pairs"] == 0
+    votes = (await db_session.execute(select(EvalPairLabel))).scalars().all()
+    assert len(votes) == 3 and any(v.annotator_user_id == other.id and v.label == "DISTINCT" for v in votes)
+
+
+@pytest.mark.asyncio
+async def test_disagreement_queue_ignores_unverified_identity(signed_in, db_session):
+    client, reviewer = signed_in
+    reviewer.role = RoleEnum.admin
+    first = await seed_user(db_session, index=2)
+    second = await seed_user(db_session, index=3)
+    pair, _, _ = await seed_pair(db_session)
+    db_session.add_all([
+        EvalPairLabel(pair_id=pair.id, origin="human", annotator_user_id=first.id, annotator=f"user:{first.id}", label="EVOLVED"),
+        EvalPairLabel(pair_id=pair.id, origin="human", annotator_user_id=second.id, annotator="forged-identity", label="DISTINCT"),
+    ])
+    await db_session.commit()
+    assert (await client.get("/api/v1/eval/review/next")).json() == {"done": True, "pair": None}

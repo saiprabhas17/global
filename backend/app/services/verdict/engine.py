@@ -102,8 +102,14 @@ class EngineConfig(TypedDict):
     score_kind: str
     method_version: str
     nli: NLIConfiguration
-    stance_cache: dict[str, str | int | float]
+    stance_cache: StanceCacheConfig
     warnings: list[str]
+
+
+class StanceCacheConfig(TypedDict):
+    key: str
+    max_entries: int
+    ttl_seconds: float
 
 
 def engine_config() -> EngineConfig:

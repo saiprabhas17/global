@@ -226,3 +226,12 @@ async def test_status_endpoint_auth(async_client):
 async def test_status_endpoint_unauth(async_client):
     response = await async_client.get("/api/v1/collection/status")
     assert response.status_code == 401
+
+
+@pytest.fixture(autouse=True)
+def isolated_graph_projection(monkeypatch: pytest.MonkeyPatch):
+    """Pipeline unit tests do not contact a live Neo4j projection."""
+    from unittest.mock import AsyncMock
+
+    from app.services.evolution.neo4j_writer import Neo4jWriter
+    monkeypatch.setattr(Neo4jWriter, "sync_persisted_graph", AsyncMock(return_value={"success": True}))
