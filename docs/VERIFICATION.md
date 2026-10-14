@@ -108,6 +108,36 @@ Windows Docker instance is not remotely accessible from this workspace. A full
 container rebuild here remains blocked by build-container resolution of the
 cloud proxy; it is not claimed as a successful Windows startup test.
 
+## Desktop installation isolation
+
+A subsequent Windows trace reported `role "gmee" does not exist`, and Compose
+reported an older Ollama container in the same `infra` project. The previous
+desktop configuration inherited fixed `gmee_*` container names and the default
+`infra` project, allowing it to reuse a database initialized for another user.
+Password repair alone does not resolve an absent role or an unrelated database.
+
+`docker-compose.local.yml` now selects `gmee-local`, clears inherited fixed
+container names and addresses, and lets Docker allocate the proxy subnet.
+Desktop containers and named volumes are scoped to the installation. The
+frontend remains loopback-only, the data network remains private, and local
+proxy headers are ignored. An older installation's records remain in its
+original volumes; they are not automatically imported into the new databases.
+
+Validation used the actual merged base/local Compose configuration with a
+separate disposable project while the older containers remained running:
+
+- All three new datastores became healthy.
+- PostgreSQL authenticated `gmee` to database `gmee` from another container;
+  an incorrect password was rejected.
+- An authenticated Neo4j Bolt query succeeded, and Redis returned `PONG`.
+- Every data volume belonged to the new project; no pre-existing volume was
+  reused. All pre-existing container IDs remained running.
+- Static deployment checks now enforce local resource isolation; the 20
+  infrastructure tests, Ruff, and whitespace checks pass.
+
+These checks cover datastore startup, authentication and isolation. They do not
+claim a completed frontend/backend startup on the user's Windows computer.
+
 ## External and scientific requirements
 
 Live Wikipedia and the default BBC RSS HTTPS destinations were denied by the

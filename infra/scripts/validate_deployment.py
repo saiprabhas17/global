@@ -96,6 +96,9 @@ def validate_proxy_network(model: dict[str, Any]) -> None:
 
 def validate_compose() -> None:
     production = compose_model(["infra/docker-compose.yml"])
+    local = compose_model(
+        ["infra/docker-compose.yml", "infra/docker-compose.local.yml"]
+    )
     development = compose_model(
         [
             "infra/docker-compose.yml",
@@ -106,6 +109,46 @@ def validate_compose() -> None:
     smoke = compose_model(["infra/docker-compose.smoke.yml"])
     validate_proxy_network(production)
     validate_proxy_network(smoke)
+    require(
+        local.get("name") == "gmee-local",
+        "Desktop installation must use its own stable Compose project name.",
+    )
+    for name, service in local["services"].items():
+        require(
+            not service.get("container_name"),
+            f"Local {name} must use a project-scoped container name.",
+        )
+        for network in service.get("networks", {}).values():
+            require(
+                not (network or {}).get("ipv4_address"),
+                f"Local {name} must not inherit a fixed legacy network address.",
+            )
+        for port in service.get("ports", []):
+            require(
+                port.get("host_ip") in {"127.0.0.1", "::1"},
+                f"Local {name} must publish only to loopback.",
+            )
+    for kind in ("volumes", "networks"):
+        for resource in local[kind].values():
+            require(
+                resource.get("name", "").startswith("gmee-local_")
+                and not resource.get("external"),
+                "Desktop resources must belong to their own Compose project.",
+            )
+    # With unresolved env files, Compose may serialize a merged environment
+    # as KEY=value entries rather than a mapping.
+    local_environment = local["services"]["backend"]["environment"]
+    if isinstance(local_environment, list):
+        local_environment = dict(
+            entry.split("=", 1) for entry in local_environment if "=" in entry
+        )
+    require(
+        not local["networks"]["proxy"].get("ipam", {}).get("config")
+        and local["networks"]["data"].get("internal") is True
+        and "data" not in local["services"]["frontend"]["networks"]
+        and local_environment.get("FORWARDED_ALLOW_IPS") == "127.0.0.1",
+        "Desktop networking must allocate its own subnet and ignore proxy headers.",
+    )
     for store in ("postgres", "neo4j", "redis"):
         require(
             not production["services"][store].get("ports"),

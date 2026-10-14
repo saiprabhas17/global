@@ -1,5 +1,33 @@
-# The checked-in dependency constraints target Python 3.11/Linux x86-64 CPU.
-# On Apple Silicon Docker emulates this backend; other services stay native.
+# Keep the desktop installation separate from older projects named "infra".
+# Compose prefixes containers, volumes and networks with this project name.
+name: gmee-local
+
 services:
+  postgres:
+    container_name: !reset null
+  neo4j:
+    container_name: !reset null
+  redis:
+    container_name: !reset null
   backend:
+    container_name: !reset null
+    # The dependency constraints target Python 3.11/Linux x86-64 CPU.
+    # Apple Silicon emulates this backend; other services stay native.
     platform: linux/amd64
+    environment:
+      # Desktop traffic enters through the loopback-only frontend. Ignore
+      # forwarded client addresses so dynamic Docker addresses need no trust.
+      FORWARDED_ALLOW_IPS: 127.0.0.1
+    networks:
+      proxy:
+        ipv4_address: !reset null
+  frontend:
+    container_name: !reset null
+    networks:
+      proxy:
+        ipv4_address: !reset null
+
+networks:
+  proxy:
+    # Let Docker select an available subnet instead of reusing the legacy one.
+    ipam: !reset {}

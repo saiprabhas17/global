@@ -33,6 +33,12 @@ the Python/Node dependencies and datastore images, so it can take several minute
 Keep Docker running. The launchers create unique private credentials if `.env`
 is absent and preserve existing configuration/volumes. Never share `.env`.
 
+The desktop stack uses the Compose project name `gmee-local`. Its containers,
+volumes and networks belong to that project, and Docker allocates available
+network addresses. Older installations named `infra`, including their database
+contents, remain separate. This desktop stack starts with its own empty databases;
+it does not automatically import records from an older installation.
+
 Local NLP additionally needs the model weights. To prepare them once:
 
 ```powershell
@@ -76,6 +82,17 @@ container's local socket. It preserves database contents and uses the current
 configuration. Do not delete the database volume to fix a password mismatch.
 If another service reports an authentication error afterward, restore its
 original credentials from your earlier `.env` and rerun the launcher.
+
+### PostgreSQL reports `role "gmee" does not exist`
+
+An older launcher could reuse the `infra` project and its fixed `gmee_*`
+containers. That database may have been initialized for a different application
+or administrator, so changing the password of `gmee` cannot repair it.
+
+Update `infra/docker-compose.local.yml` to the current version and run
+`Start-GMEE.bat` normally. The `gmee-local` project creates its own PostgreSQL,
+Neo4j and Redis stores using your current `.env`. It does not change the older
+database's users or remove its volumes. Keep `.env` when updating this installation.
 
 For native hot reload, install the dependencies as described in [README](README.md),
 start the backend on 8000, then run `npm run dev` from `frontend`. Its default
