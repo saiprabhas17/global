@@ -2,7 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$files = @('verify_endpoints.ps1', 'infra/scripts/read_only_sweep.ps1', 'infra/scripts/validate_powershell.ps1', 'scripts/start-local.ps1', 'infra/tests/test_local_launcher.ps1')
+$files = @('verify_endpoints.ps1', 'infra/scripts/read_only_sweep.ps1', 'infra/scripts/validate_powershell.ps1', 'scripts/start-local.ps1', 'scripts/restore-local-data.ps1', 'infra/tests/test_local_launcher.ps1', 'infra/tests/test_local_recovery.ps1')
 $failures = 0
 foreach ($relative in $files) {
     $tokens = $null

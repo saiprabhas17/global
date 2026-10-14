@@ -138,6 +138,41 @@ separate disposable project while the older containers remained running:
 These checks cover datastore startup, authentication and isolation. They do not
 claim a completed frontend/backend startup on the user's Windows computer.
 
+## Legacy corpus recovery (2026-10-14)
+
+`scripts/restore-local-data.ps1` restores a legacy `gmee03`/`gmee04` PostgreSQL
+database into a new database in the desktop PostgreSQL container. It saves a
+binary-safe custom-format backup and previous configuration, verifies counts
+before/after migration, and switches the application only after verification.
+Startup failure rolls configuration back. Source databases and volumes are not
+removed or overwritten. Graph projection now accommodates up to 20,000 articles;
+recovery creates lookup indexes before rebuilding persisted graph data.
+
+Validation in the cloud workspace:
+
+- Eight offline PowerShell recovery scenarios passed: success, unsupported
+  schema, count mismatch, backup failure, restore failure, migration failure,
+  application startup rollback, and graph failure after PostgreSQL recovery.
+- The actual recovery script ran through a harness against two disposable
+  PostgreSQL 16 containers. A synthetic `gmee03` corpus contained 10,212 claims,
+  10,543 articles, an entity, and an extra table with Unicode data and a sequence.
+  The script used real `pg_dump`, Docker file copies, `pg_restore`, and Alembic.
+  IDs, text, foreign keys, Unicode, and sequence state survived; the recovered
+  copy reached `gmee04`, the source stayed at `gmee03`, and the previous target
+  database remained present.
+- A separate disposable Neo4j 5.20 instance received all 10,212 claims, 10,543
+  articles, the entity, and 10,212 claim-to-article provenance links through the
+  script's graph rebuild. Counts were queried independently afterward.
+- PowerShell syntax, static deployment checks, and changed Python lint passed.
+  Windows PowerShell 5.1 recovery scenarios are registered in deployment CI;
+  local script execution used PowerShell 7.4.6 on Linux.
+
+The harness used the installed native Python environment instead of building a
+backend image, and mocked application-container startup and HTTP readiness.
+Those steps, and the user's actual Windows database recovery, are not claimed
+as tested here. The fixture is restoration evidence, not research evaluation
+data or model-accuracy evidence.
+
 ## External and scientific requirements
 
 Live Wikipedia and the default BBC RSS HTTPS destinations were denied by the

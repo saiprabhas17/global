@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 # Neo4j's bolt limits while cutting a 10k-claim sync from ~40k round-trips
 # down to a couple of dozen statements.
 _BATCH_SIZE = 500
-MAX_PROJECTED_ARTICLES = 10000
+# Includes retained corpora above 10k articles while keeping a finite bound.
+MAX_PROJECTED_ARTICLES = 20000
 MAX_PROJECTED_CLAIMS = 50000
 MAX_PROJECTED_RELATIONSHIPS = 100000
 GraphTransaction = AsyncManagedTransaction | AsyncSession

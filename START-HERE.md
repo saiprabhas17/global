@@ -94,6 +94,46 @@ Update `infra/docker-compose.local.yml` to the current version and run
 Neo4j and Redis stores using your current `.env`. It does not change the older
 database's users or remove its volumes. Keep `.env` when updating this installation.
 
+### Restore records from the older `gmee_v2` database
+
+If the app starts but the corpus is empty after moving to `gmee-local`, the old
+records remain in the original Docker volume. First confirm the source database
+and counts. For the older `gmee_postgres` container initialized with administrator
+`postgres`, use:
+
+```powershell
+docker exec gmee_postgres psql -U postgres -d gmee_v2 -c "SELECT count(*) FROM claims;"
+docker exec gmee_postgres psql -U postgres -d gmee_v2 -c "SELECT * FROM alembic_version;"
+```
+
+With the latest recovery script and backend source present, run from the project
+folder while Docker Desktop and the local app are running:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore-local-data.ps1
+```
+
+The script supports source schema `gmee03`/`gmee04`. It saves a custom-format
+PostgreSQL backup under `local-backups/<timestamp>/`, restores into a **new,
+uniquely named database**, builds the updated backend, and migrates only that copy.
+It verifies claim/article counts before and after migration, then updates only
+`POSTGRES_DB` in `.env` and restarts the app. Failed application startup restores
+the previous configuration. No existing database or Docker volume is deleted.
+The source container must remain running; avoid ingestion into the old database
+during recovery because changing counts will stop the switch.
+
+The local graph is rebuilt from PostgreSQL's saved articles, claims, entities,
+and relationships without rerunning NLP. Graph-only data from an older Neo4j
+installation is not imported. A graph failure is reported separately and leaves
+the verified recovered PostgreSQL database selected. The graph rebuild remains
+bounded at 20,000 articles, 50,000 claims, and 100,000 relationships.
+
+Keep `local-backups` private: it includes database contents and a copy of the
+previous `.env`. This directory is ignored by Git. Sign in using an account from
+the recovered database; accounts created only in the previous local database
+remain there. The old `gmee` database, original `gmee_v2`, and previous local
+database all remain available.
+
 For native hot reload, install the dependencies as described in [README](README.md),
 start the backend on 8000, then run `npm run dev` from `frontend`. Its default
 port is 3000; `/api` proxies to that backend. Binding to `0.0.0.0` enables a

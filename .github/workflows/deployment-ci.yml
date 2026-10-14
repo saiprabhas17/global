@@ -68,6 +68,9 @@ jobs:
       - name: Verify local launcher recovery and failure handling
         shell: powershell
         run: powershell.exe -NoProfile -File infra/tests/test_local_launcher.ps1
+      - name: Verify data recovery ordering and rollback
+        shell: powershell
+        run: powershell.exe -NoProfile -File infra/tests/test_local_recovery.ps1
 
   http-smoke:
     runs-on: ubuntu-latest

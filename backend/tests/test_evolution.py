@@ -21,6 +21,26 @@ from app.services.evolution.neo4j_writer import Neo4jWriter
 from app.services.evolution.orchestrator import EvolutionOrchestrator
 
 
+@pytest.mark.asyncio
+async def test_recovery_graph_capacity_guard_keeps_existing_graph_untouched():
+    from app.services.evolution.neo4j_writer import MAX_PROJECTED_ARTICLES
+
+    article = Article(id=uuid.uuid4())
+    results = []
+    for rows in ([article] * (MAX_PROJECTED_ARTICLES + 1), [], []):
+        result = MagicMock()
+        result.all.return_value = rows
+        results.append(result)
+    db = AsyncMock()
+    db.scalars.side_effect = results
+    writer = Neo4jWriter()
+    with patch.object(writer, "sync_to_graph", new_callable=AsyncMock) as write:
+        result = await writer.sync_persisted_graph(db)
+    assert result["reason"] == "projection_capacity_exceeded"
+    assert result["success"] is False
+    write.assert_not_awaited()
+
+
 def _result(rows: list[Any]) -> MagicMock:
     """Fake SQLAlchemy Result whose .scalars().all() returns ``rows``."""
     res = MagicMock()

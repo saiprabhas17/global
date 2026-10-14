@@ -74,6 +74,7 @@ _scroll_*.mjs
 _ui_sweep*
 _hub.txt
 backend/_backup/
+local-backups/
 backend/eval_report.json
 gmee_backend_source.zip
 
